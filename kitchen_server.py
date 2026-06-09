@@ -67,6 +67,13 @@ _ENV = load_env()
 SPOTIFY_CLIENT_ID = _ENV.get("SPOTIFY_CLIENT_ID", "")
 SPOTIFY_CLIENT_SECRET = _ENV.get("SPOTIFY_CLIENT_SECRET", "")
 ANTHROPIC_API_KEY = _ENV.get("ANTHROPIC_API_KEY", "")
+
+# --- RECIPE IMPORT (optional — cooking display must boot without it) ---
+try:
+    import kitchen_import
+except Exception as _e:
+    kitchen_import = None
+    print(f"[warn] kitchen_import unavailable ({_e}) — /import disabled. Run: pip3 install anthropic")
 SPOTIFY_REDIRECT_URI = f"http://127.0.0.1:{PORT}/spotify-callback"
 SPOTIFY_TOKEN_FILE = SCRIPT_DIR / "spotify_tokens.json"
 SPOTIFY_SCOPE = "user-read-currently-playing user-read-playback-state user-modify-playback-state"
@@ -456,6 +463,58 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(state)
             except Exception as e:
                 self.send_error(400, f"bad request: {e}")
+        elif path == "/import":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            if kitchen_import is None:
+                self._json({"error": "import disabled — run: pip3 install anthropic"}, code=503)
+                return
+            try:
+                req = json.loads(body)
+                req_type = req.get("type")
+                payload = req.get("payload")
+            except Exception:
+                self._json({"error": 'body must be JSON: {"type": "paste", "payload": "<recipe text>"}'}, code=400)
+                return
+            if req_type in ("url", "photos", "pdf", "file"):
+                self._json({"error": "this input type lands in a later milestone"}, code=501)
+                return
+            if req_type != "paste":
+                self._json({"error": 'unknown import type — expected "paste"'}, code=400)
+                return
+            if not isinstance(payload, str) or not payload.strip():
+                self._json({"error": "empty payload"}, code=400)
+                return
+            if not os.environ.get("ANTHROPIC_API_KEY", "").strip():
+                self._json({"error": "import disabled — set ANTHROPIC_API_KEY in .env"}, code=503)
+                return
+            started = time.time()
+            try:
+                result = kitchen_import.parse_with_claude(payload, "paste", source_text=payload)
+            except Exception as e:
+                reason = (str(e).strip().splitlines() or [type(e).__name__])[0][:120]
+                kitchen_import.log_parse_event(
+                    "error", source_type="paste",
+                    parse_ms=int((time.time() - started) * 1000), error=reason,
+                )
+                self._json({"error": f"parse failed: {reason}", "retryable": True}, code=502)
+                return
+            parse_ms = int((time.time() - started) * 1000)
+            if result["status"] == "parsed":
+                kitchen_import.log_parse_event(
+                    "parsed",
+                    slug=result["recipe"].get("slug"),
+                    source_type="paste",
+                    parse_ms=parse_ms,
+                    pages_processed=result["metadata"]["pages_processed"],
+                    low_confidence_fields=result["metadata"]["low_confidence_fields"],
+                    g2_flag_count=len(result["g2_flags"]),
+                )
+            else:
+                kitchen_import.log_parse_event(
+                    "insufficient_content", source_type="paste", parse_ms=parse_ms,
+                )
+            self._json(result)
         elif path == "/spotify-play":
             ok, msg = spotify_control("PUT", "play")
             self._json({"ok": ok, "error": msg})

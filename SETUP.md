@@ -44,10 +44,11 @@ pip dependency — everything else is stdlib):
 pip3 install anthropic
 ```
 
-On newer macOS, if pip refuses to install system-wide, use:
+On newer macOS, Python is "externally managed" and plain pip3 refuses to
+install. This is the command that works (verified on this MacBook):
 
 ```bash
-pip3 install --user anthropic
+pip3 install --user --break-system-packages anthropic
 ```
 
 If `anthropic` isn't installed, the server still starts and the cooking
