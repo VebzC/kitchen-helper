@@ -1,0 +1,10 @@
+.env
+spotify_tokens.json
+kitchen_state.json
+kitchen_import_log.jsonl
+.DS_Store
+__pycache__/
+*.pyc
+*.bak
+recipes/
+.claude/settings.local.json

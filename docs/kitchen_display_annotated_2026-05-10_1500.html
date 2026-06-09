@@ -1,0 +1,2041 @@
+<!DOCTYPE html>
+<!--
+  ============================================================================
+  READ ME FIRST — orientation for this annotated file
+  ============================================================================
+  This is the kitchen display app — a single HTML file that gets served by
+  kitchen_server.py and loaded into a browser on both your phone and your
+  laptop. The same file produces two different experiences depending on
+  screen size: on the laptop it's a full cooking interface with large
+  instruction text, on the phone it's a remote control with huge next/back
+  buttons.
+
+  The file has three main parts:
+
+    1. CSS (lines ~10 to ~862) — all the styling. The interesting bit is
+       toward the bottom: media queries that swap the entire layout based
+       on screen width. This is mostly mechanical and only annotated where
+       there's something subtle going on (like the body.phone-mode class
+       that JavaScript toggles).
+
+    2. HTML body (lines ~865 to ~960) — the structural skeleton: header,
+       timer panel, main step area, control buttons, and the timer modal.
+       Most fields are placeholders ("—") that get filled in by JavaScript
+       once data arrives.
+
+    3. JavaScript (lines ~961 to end) — the actual logic. This is where
+       almost all the annotations live. The interesting subsystems are:
+         - RECIPE constant: the hardcoded recipe data
+         - SERVER SYNC: how state moves between devices via the server
+         - SPOTIFY: optimistic UI + scheduled catch-up fetches
+         - STEP NAVIGATION: rendering the current cooking step
+         - TIMERS: the timer model and alerting logic
+         - PHONE-LAYOUT: the JS bridge that moves DOM elements on resize
+
+  Lines tagged "DESIGN NOTE" are observations about Ousterhout's deep/shallow
+  module distinction — places where the code's structure is doing real work,
+  or places worth thinking about before extending.
+
+  DESIGN NOTE — what kitchen_import.py will replace
+    The RECIPE constant near the top of the script tag is the contract
+    every renderer in this file reads from. Its shape — name, metaLine,
+    steps[].{title, instruction, timeNote, ingredients[].{amount, name}}
+    — is exactly what kitchen_import.py needs to produce. Match the shape
+    and everything below it Just Works.
+  ============================================================================
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Kitchen">
+<title>Kitchen Display</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  :root {
+    --bg: #0e0e10;
+    --bg-card: #1a1a1e;
+    --bg-elevated: #25252b;
+    --border: #2e2e35;
+    --text: #f0efea;
+    --text-dim: #8a8a92;
+    --text-faint: #4a4a52;
+    --accent: #ff8c42;
+    --accent-dim: #b86530;
+    --warn: #ffb84d;
+    --done: #4ade80;
+    --danger: #f87171;
+    --spotify: #1ed760;
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
+    font-feature-settings: "ss01", "cv11";
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* ============================================
+     LAYOUT — default is landscape; portrait kicks in via media query
+     ============================================ */
+  .app {
+    display: grid;
+    grid-template-columns: 1fr clamp(280px, 26vw, 460px);
+    grid-template-rows: auto 1fr auto;
+    height: 100vh;            /* fallback for older browsers */
+    height: 100dvh;           /* dynamic viewport — respects iOS chrome/home indicator */
+    gap: 14px;
+    padding: 14px;
+    padding-bottom: max(14px, env(safe-area-inset-bottom));
+  }
+
+  /* HEADER */
+  .header {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 0 4px;
+  }
+  .title-block { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .title {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .title .accent { color: var(--accent); }
+  .meta-line {
+    font-size: 13px;
+    color: var(--text-dim);
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+
+  /* SPOTIFY WIDGET */
+  .spotify-widget {
+    display: none;
+    align-items: center;
+    gap: 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 16px 10px 10px;
+    min-width: 260px;
+    max-width: 360px;
+  }
+  .spotify-widget.active { display: flex; }
+  .spotify-art {
+    width: 56px;
+    height: 56px;
+    border-radius: 6px;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: var(--bg-elevated);
+  }
+  .spotify-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .spotify-track {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+  }
+  .spotify-artist {
+    font-size: 12px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+  }
+  .spotify-progress {
+    margin-top: 5px;
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .spotify-progress-fill {
+    height: 100%;
+    background: var(--spotify);
+    width: 0%;
+    border-radius: 2px;
+    transition: width 1s linear;
+  }
+
+  .clock-block {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .clock {
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
+    font-size: 18px;
+    letter-spacing: 0.02em;
+  }
+  .sync-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--done);
+    transition: background 0.3s;
+  }
+  .sync-indicator.offline { background: var(--danger); }
+
+  /* MAIN STEP AREA */
+  .main {
+    background: var(--bg-card);
+    border-radius: 16px;
+    padding: 36px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .step-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 10px;
+    gap: 12px;
+  }
+  .step-counter {
+    font-size: 13px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: 700;
+  }
+  .step-time {
+    font-size: 13px;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-width: 0;
+  }
+  .step-time > span { display: inline-block; }
+
+  /* Suggested-timer button (next to time note) */
+  .suggested-timer-btn {
+    display: inline-block;
+    padding: 6px 14px;
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 0.85em;
+    font-weight: 800;
+    cursor: pointer;
+    text-transform: none;
+    letter-spacing: 0;
+    vertical-align: middle;
+    transition: transform 0.1s, background 0.15s;
+  }
+  .suggested-timer-btn:hover,
+  .suggested-timer-btn:active { background: #ffa05c; }
+  .suggested-timer-btn:active { transform: scale(0.96); }
+  .step-title {
+    font-size: 38px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin-bottom: 22px;
+    line-height: 1.05;
+    color: var(--text);
+  }
+  .step-instruction {
+    font-size: 22px;
+    line-height: 1.5;
+    color: var(--text);
+    flex-grow: 1;
+    overflow-y: auto;
+    padding-right: 8px;
+  }
+  .step-instruction::-webkit-scrollbar { width: 8px; }
+  .step-instruction::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  /* Numbered step list inside the instruction area */
+  .step-list {
+    list-style: none;
+    counter-reset: step-counter;
+    padding: 0;
+    margin: 0;
+  }
+  .step-list li {
+    counter-increment: step-counter;
+    position: relative;
+    padding-left: 2.4em;
+    margin-bottom: 0.85em;
+  }
+  .step-list li:last-child { margin-bottom: 0; }
+  .step-list li::before {
+    content: counter(step-counter);
+    position: absolute;
+    left: 0;
+    top: 0.05em;
+    width: 1.7em;
+    height: 1.7em;
+    line-height: 1.7em;
+    text-align: center;
+    background: var(--bg-elevated);
+    color: var(--accent);
+    border-radius: 50%;
+    font-weight: 800;
+    font-size: 0.7em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ingredients-used {
+    margin-bottom: 22px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ingredients-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 10px;
+    font-weight: 700;
+  }
+  .ingredients-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .ingredient-tag {
+    background: var(--bg-elevated);
+    padding: 7px 13px;
+    border-radius: 8px;
+    font-size: 15px;
+  }
+  .ingredient-tag .amount {
+    color: var(--accent);
+    font-weight: 700;
+    margin-right: 6px;
+  }
+
+  /* TIMER PANEL */
+  .timer-panel {
+    background: var(--bg-card);
+    border-radius: 16px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+  }
+  .panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+  }
+  .panel-title {
+    font-size: 12px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: 700;
+  }
+  .add-timer-btn {
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-family: inherit;
+  }
+  .add-timer-btn:active { background: #ffa05c; }
+
+  #timers-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .timer {
+    background: var(--bg-elevated);
+    border-radius: 12px;
+    padding: 12px 16px;
+    border-left: 4px solid var(--accent-dim);
+    transition: background 0.3s;
+  }
+  .timer.running { border-left-color: var(--accent); }
+  .timer.done {
+    border-left-color: var(--done);
+    animation: pulse 1.5s infinite;
+  }
+  .timer.warning { border-left-color: var(--warn); }
+
+  @keyframes pulse {
+    0%, 100% { background: var(--bg-elevated); }
+    50% { background: rgba(74, 222, 128, 0.18); }
+  }
+
+  @keyframes flashOut {
+    0% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  .timer-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }
+  .timer-name {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .timer-display {
+    font-size: 22px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+    letter-spacing: -0.02em;
+  }
+  .timer.done .timer-display { color: var(--done); }
+  .timer.warning .timer-display { color: var(--warn); }
+
+  .timer-controls {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .timer-btn {
+    flex: 1;
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-family: inherit;
+  }
+  .timer-btn:active { background: var(--border); color: var(--text); }
+  .timer-btn.danger:active { background: var(--danger); color: var(--bg); border-color: var(--danger); }
+
+  .empty-timers {
+    color: var(--text-faint);
+    font-size: 14px;
+    text-align: center;
+    padding: 20px;
+    font-style: italic;
+  }
+
+  /* SPOTIFY TRANSPORT CONTROLS — phone-only, lives inside widget card */
+  .spotify-controls {
+    display: none;
+    gap: 10px;
+    justify-content: flex-start;
+    align-items: center;
+    margin-top: 8px;
+  }
+  /* `.active` only shows on phone (see phone media query). On 27"/laptop it stays hidden. */
+  .spotify-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: transform 0.1s;
+    font-family: inherit;
+  }
+  .spotify-btn:active { transform: scale(0.92); }
+  .spotify-btn svg { width: 16px; height: 16px; }
+  .spotify-btn.play {
+    width: 42px;
+    height: 36px;
+    background: var(--spotify);
+    border-color: var(--spotify);
+    color: var(--bg);
+    border-radius: 8px;
+  }
+  .spotify-btn.play svg { width: 18px; height: 18px; }
+
+  /* CONTROLS BAR */
+  .controls {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 12px;
+    padding: 0 4px;
+    align-items: center;
+  }
+  .nav-btn {
+    background: var(--bg-card);
+    color: var(--text);
+    border: none;
+    border-radius: 12px;
+    padding: 18px 32px;
+    font-size: 18px;
+    font-weight: 800;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    min-height: 60px;
+    font-family: inherit;
+  }
+  .nav-btn:active:not(:disabled) { background: var(--bg-elevated); }
+  .nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .nav-btn.next {
+    background: var(--accent);
+    color: var(--bg);
+    flex: 1;
+  }
+  .nav-btn.next:active { background: #ffa05c; }
+  .nav-btn.prev { min-width: 120px; }
+
+  .progress-dots {
+    display: flex;
+    gap: 6px;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    padding: 0 16px;
+    flex-wrap: wrap;
+  }
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--border);
+    transition: all 0.2s;
+  }
+  .dot.complete { background: var(--accent-dim); }
+  .dot.current { background: var(--accent); transform: scale(1.5); }
+
+  /* TIMER MODAL */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.78);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+  .modal-overlay.active { display: flex; }
+  .modal {
+    background: var(--bg-card);
+    border-radius: 16px;
+    padding: 28px;
+    width: 90%;
+    max-width: 480px;
+    border: 1px solid var(--border);
+  }
+  .modal h2 {
+    font-size: 22px;
+    margin-bottom: 20px;
+    font-weight: 800;
+  }
+  .modal label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 6px;
+    font-weight: 700;
+  }
+  .modal input {
+    width: 100%;
+    background: var(--bg-elevated);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    font-size: 17px;
+    margin-bottom: 16px;
+    font-family: inherit;
+  }
+  .modal input:focus { outline: none; border-color: var(--accent); }
+  .duration-presets {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .preset-btn {
+    background: var(--bg-elevated);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 6px;
+    font-size: 14px;
+    cursor: pointer;
+    font-weight: 700;
+    font-family: inherit;
+  }
+  .preset-btn:active { background: var(--border); }
+  .preset-btn.selected {
+    background: var(--accent);
+    color: var(--bg);
+    border-color: var(--accent);
+  }
+  .modal-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .modal-btn {
+    flex: 1;
+    padding: 16px;
+    border-radius: 8px;
+    border: none;
+    font-size: 15px;
+    font-weight: 800;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-family: inherit;
+  }
+  .modal-btn.cancel { background: var(--bg-elevated); color: var(--text-dim); }
+  .modal-btn.confirm { background: var(--accent); color: var(--bg); }
+
+  /* ============================================
+     PORTRAIT — primary layout for 27" monitor + phone
+     ============================================ */
+  @media (orientation: portrait) {
+    .app {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto auto 1fr auto;
+    }
+    .timer-panel {
+      grid-row: 2;
+      max-height: 32vh;
+    }
+    #timers-container {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+    }
+    .main {
+      grid-row: 3;
+    }
+  }
+
+  /* ============================================
+     27" MONITOR IN PORTRAIT — bump up text for cooking-distance reading
+     (orientation: portrait + non-phone width)
+     ============================================ */
+  @media (orientation: portrait) and (min-width: 900px) {
+    .app { padding: 22px; gap: 18px; }
+    .title { font-size: 32px; }
+    .meta-line { font-size: 17px; }
+    .clock { font-size: 24px; }
+
+    .spotify-widget {
+      min-width: 340px;
+      max-width: 460px;
+      padding: 14px 20px 14px 14px;
+      gap: 16px;
+    }
+    .spotify-art { width: 80px; height: 80px; border-radius: 8px; }
+    .spotify-track { font-size: 18px; max-width: 320px; }
+    .spotify-artist { font-size: 14px; max-width: 320px; }
+    .spotify-progress { height: 4px; margin-top: 8px; }
+
+    .main { padding: 48px; border-radius: 20px; }
+    .step-meta { margin-bottom: 14px; }
+    .step-counter { font-size: 16px; }
+    .step-time { font-size: 16px; }
+    .step-title { font-size: 64px; margin-bottom: 32px; }
+    .step-instruction { font-size: 34px; line-height: 1.45; }
+    .ingredients-label { font-size: 14px; margin-bottom: 14px; }
+    .ingredient-tag { font-size: 19px; padding: 10px 18px; }
+
+    .timer-panel { padding: 24px; max-height: 28vh; }
+    .panel-title { font-size: 16px; }
+    .add-timer-btn { font-size: 16px; padding: 12px 22px; }
+    .timer { padding: 18px 22px; }
+    .timer-name { font-size: 22px; }
+    .timer-display { font-size: 32px; }
+    .timer-btn { font-size: 14px; padding: 12px; }
+
+    .nav-btn {
+      font-size: 24px;
+      padding: 26px 40px;
+      min-height: 84px;
+      border-radius: 16px;
+    }
+    .nav-btn.prev { min-width: 200px; }
+    .dot { width: 14px; height: 14px; }
+  }
+
+  /* ============================================
+     PHONE — primary controller, compact portrait
+     ============================================ */
+  @media (max-width: 768px) {
+    /* Phone = pure remote control. Override grid with flex so the big
+       buttons can grow to fill whatever vertical space remains. */
+    .app {
+      display: flex;
+      flex-direction: column;
+      padding: 10px;
+      padding-bottom: max(10px, env(safe-area-inset-bottom));
+      gap: 8px;
+    }
+    /* Header is a normal row: title-block on left, header-right (clock) on right. */
+    .header {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: nowrap;
+      order: 1;
+    }
+    .title-block {
+      flex: 1;
+      min-width: 0;
+    }
+    .title { font-size: 17px; }
+    .meta-line { font-size: 11px; }
+
+    .header-right {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .clock-block {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .clock { font-size: 14px; }
+
+    /* The Spotify widget gets MOVED by JS out of .header-right and into a
+       sibling position right above .controls. The styles below apply once
+       it's been moved (it has class "phone-detached" added to body via JS). */
+    body.phone-mode .spotify-widget {
+      width: 100%;
+      min-width: 0;
+      max-width: 100%;
+      padding: 0;
+      gap: 0;
+      align-items: stretch;
+      overflow: hidden;
+      flex: 0 0 auto;
+      order: 4;
+      height: 116px;
+    }
+
+    /* Album art on left fills full widget height (square) */
+    body.phone-mode .spotify-art {
+      width: 116px;
+      height: 116px;
+      border-radius: 0;
+      flex-shrink: 0;
+      object-fit: cover;
+    }
+    body.phone-mode .spotify-text {
+      flex: 1;
+      min-width: 0;
+      padding: 10px 14px 10px 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 3px;
+    }
+    body.phone-mode .spotify-track {
+      font-size: 14px;
+      max-width: none;
+      line-height: 1.2;
+    }
+    body.phone-mode .spotify-artist {
+      font-size: 12px;
+      max-width: none;
+      line-height: 1.2;
+    }
+    body.phone-mode .spotify-progress {
+      margin-top: 6px;
+      max-width: 100%;
+    }
+    /* Activate transport controls inline within the widget (PHONE ONLY) */
+    body.phone-mode .spotify-controls.active {
+      display: flex;
+      margin-top: 6px;
+    }
+
+    /* Timer panel: order 2 — just under the title row */
+    .timer-panel {
+      order: 2;
+      flex: 0 0 auto;
+      padding: 10px 10px 10px 10px;
+      max-height: none;
+      overflow: visible;
+    }
+    /* Horizontal scrolling row of compact timer cards */
+    #timers-container {
+      display: flex !important;
+      flex-direction: row;
+      grid-template-columns: none;
+      gap: 8px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+      padding-bottom: 2px;
+    }
+    #timers-container::-webkit-scrollbar { display: none; }
+
+    /* Compact timer card: just time + pause + cancel */
+    .timer {
+      flex: 0 0 auto;
+      min-width: 130px;
+      padding: 8px 10px;
+      border-left-width: 3px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .timer-row {
+      gap: 4px;
+    }
+    .timer-name { display: none; }
+    .timer-display { font-size: 22px; flex: 1; text-align: left; }
+    .timer-controls { gap: 4px; margin-top: 0; }
+    .timer-btn {
+      padding: 5px 0;
+      font-size: 11px;
+      flex: 1;
+    }
+    /* Hide reset button on phone (rarely used, saves space) */
+    .timer-btn:nth-child(2) { display: none; }
+    .empty-timers {
+      flex: 1;
+      padding: 14px;
+      font-size: 13px;
+    }
+
+    /* Compact step-info card — show step counter + title only, no instructions */
+    .main {
+      order: 3;
+      flex: 0 0 auto;
+      padding: 14px 16px;
+      border-radius: 12px;
+    }
+    .step-meta { margin-bottom: 6px; }
+    .step-counter, .step-time { font-size: 11px; }
+    .step-title { font-size: 20px; margin-bottom: 0; line-height: 1.2; }
+    .step-instruction { display: none; }
+    .ingredients-used { display: none; }
+
+    /* HUGE remote buttons — fill remaining vertical space */
+    .controls {
+      order: 5;
+      flex: 1;
+      min-height: 160px;
+      gap: 10px;
+      padding: 0;
+      align-items: stretch;
+    }
+    .nav-btn {
+      padding: 0 12px;
+      font-size: 24px;
+      font-weight: 800;
+      min-height: 0;
+      height: auto;
+      border-radius: 16px;
+    }
+    .nav-btn.prev {
+      flex: 0 0 30%;
+      min-width: 0;
+    }
+    .nav-btn.next {
+      flex: 1;
+      font-size: 28px;
+    }
+    .progress-dots { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!--
+  HTML STRUCTURE
+  The skeleton of the page. Every text field is a placeholder ("—") that
+  gets populated by JavaScript once data arrives — either from the local
+  RECIPE constant or from the server. The structure here is the same on
+  phone and laptop; it's CSS + the applyPhoneLayout function that makes
+  the two layouts diverge.
+-->
+<div class="app">
+  <!-- HEADER: title on left, Spotify widget + clock on right.
+       On phone, the Spotify widget gets moved out of here by JavaScript. -->
+  <div class="header">
+    <div class="title-block">
+      <div class="title"><span class="accent" id="recipe-name">—</span></div>
+      <div class="meta-line" id="recipe-meta">—</div>
+    </div>
+    <div class="header-right">
+      <div class="spotify-widget" id="spotify-widget">
+        <img class="spotify-art" id="spotify-art" alt="">
+        <div class="spotify-text">
+          <div class="spotify-track" id="spotify-track">—</div>
+          <div class="spotify-artist" id="spotify-artist">—</div>
+          <div class="spotify-progress">
+            <div class="spotify-progress-fill" id="spotify-progress-fill"></div>
+          </div>
+          <!-- SPOTIFY CONTROLS (phone-only) -->
+          <div class="spotify-controls" id="spotify-controls">
+            <button class="spotify-btn" onclick="spotifyPrev()" aria-label="Previous track">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zM9.5 12L20 4v16z"/></svg>
+            </button>
+            <button class="spotify-btn play" id="spotify-play-btn" onclick="spotifyPlayPause()" aria-label="Play or pause">
+              <svg id="spotify-play-icon" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M8 5v14l11-7z"/></svg>
+              <svg id="spotify-pause-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+            </button>
+            <button class="spotify-btn" onclick="spotifyNext()" aria-label="Next track">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM4 4l10.5 8L4 20z"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="clock-block">
+        <span class="clock" id="clock">--:--</span>
+        <span class="sync-indicator" id="sync-indicator" title="Synced"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- TIMER PANEL: list of running timers, plus the "+ New Timer" button
+       that opens the modal at the bottom of the file. -->
+  <div class="timer-panel">
+    <div class="panel-header">
+      <div class="panel-title">Timers</div>
+      <button class="add-timer-btn" onclick="openTimerModal()">+ New Timer</button>
+    </div>
+    <div id="timers-container"></div>
+  </div>
+
+  <!-- MAIN STEP AREA: title, instruction text, time note, ingredient tags.
+       This is the dominant element on the laptop and the compressed
+       summary card on the phone. -->
+  <div class="main">
+    <div class="step-meta">
+      <div class="step-counter" id="step-counter">Step 1 of —</div>
+      <div class="step-time" id="step-time"></div>
+    </div>
+    <div class="step-title" id="step-title">—</div>
+    <div class="ingredients-used" id="ingredients-used" style="display:none;">
+      <div class="ingredients-label">For this step</div>
+      <div class="ingredients-list" id="ingredients-list"></div>
+    </div>
+    <div class="step-instruction" id="step-instruction">—</div>
+  </div>
+
+  <!-- CONTROLS: back / next buttons + progress dots. On the phone these
+       buttons grow huge to fill the remaining vertical space. -->
+  <div class="controls">
+    <button class="nav-btn prev" id="prev-btn" onclick="prevStep()">← Back</button>
+    <div class="progress-dots" id="progress-dots"></div>
+    <button class="nav-btn next" id="next-btn" onclick="nextStep()">Next →</button>
+  </div>
+</div>
+
+<!-- TIMER MODAL: hidden by default; openTimerModal() shows it. Lets the
+     user enter a name and pick a duration (preset buttons or custom
+     minutes input) for a new timer. Tapping a step's "▶ Start Xm timer"
+     suggestion button skips this modal entirely. -->
+<div class="modal-overlay" id="timer-modal">
+  <div class="modal">
+    <h2>New Timer</h2>
+    <label>Name</label>
+    <input type="text" id="timer-name-input" placeholder="e.g. Bake, Cool, Eggs..." autocomplete="off">
+    <label>Duration</label>
+    <div class="duration-presets" id="duration-presets">
+      <button class="preset-btn" data-min="1">1m</button>
+      <button class="preset-btn" data-min="5">5m</button>
+      <button class="preset-btn" data-min="10">10m</button>
+      <button class="preset-btn" data-min="15">15m</button>
+      <button class="preset-btn" data-min="20">20m</button>
+      <button class="preset-btn" data-min="28">28m</button>
+      <button class="preset-btn" data-min="35">35m</button>
+      <button class="preset-btn" data-min="60">1h</button>
+    </div>
+    <input type="number" id="timer-custom-min" placeholder="Custom (minutes)" min="0" max="999" inputmode="decimal">
+    <div class="modal-actions">
+      <button class="modal-btn cancel" onclick="closeTimerModal()">Cancel</button>
+      <button class="modal-btn confirm" onclick="createTimer()">Start Timer</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================================
+// RECIPE — the hardcoded recipe data
+// ============================================================================
+// This constant is the entire recipe the app currently knows about. Every
+// rendering function reads from this — step counter, instruction text,
+// time notes, ingredient tags, all of it. The shape is the contract:
+//
+//   { name, metaLine, steps: [{ title, instruction, timeNote, ingredients: [{ amount, name }] }] }
+//
+// DESIGN NOTE — the import contract
+//   This is what kitchen_import.py exists to replace. Whatever import
+//   produces — whether from a URL, a pasted block of text, or a
+//   structured file — needs to come out in exactly this shape. Match
+//   the field names, match the nesting, and the renderers below need
+//   no changes at all. Diverge from the shape and you'll be patching
+//   renderers in addition to writing import logic.
+//
+// DESIGN NOTE — what the parsers expect of the text
+//   The instruction strings get fed to splitIntoSentences (a regex with
+//   abbreviation guards for tsp/tbsp/oz/lb/min/hr/g/kg/ml/L). The timeNote
+//   strings get fed to detectTimerFromTimeNote (a regex looking for
+//   digits followed by "min" or "hr"). Time notes like "half an hour" or
+//   "30 seconds" produce no timer suggestion. The import pipeline either
+//   has to normalize text into the parsers' dialect, or the parsers have
+//   to grow more flexible. That's a real design choice, not just a bug.
+// ============================================================================
+const RECIPE = {
+  name: "Olive Oil Upside-Down Cakes",
+  metaLine: "Citrus + Pineapple  •  400°F → 350°F  •  Two 8\" pans",
+  steps: [
+    {
+      title: "Set up and stage",
+      instruction: "Pull 3 large eggs from the fridge to come to room temp (need 30–60 min). Pull 200–250g frozen pineapple into a colander over a bowl to thaw. Preheat oven to 400°F with oven thermometer in place, center rack (or upper-middle + lower-middle if both 8\" pans don't fit side by side). Oil both pans, line bottoms with parchment rounds, oil the parchment.",
+      timeNote: "10 min active, then 30+ min wait",
+      ingredients: [
+        { amount: "3", name: "large eggs" },
+        { amount: "200–250g", name: "frozen pineapple" },
+        { amount: "—", name: "olive oil for pans" },
+        { amount: "2", name: "parchment rounds" }
+      ]
+    },
+    {
+      title: "Make the orange flavoring liquid",
+      instruction: "Zest 1 tablespoon (about 1 blood orange's worth) of orange peel into a small bowl. Stir in 43g (3 tbsp) Grand Marnier and 1 tsp orange blossom water or vanilla extract. Set aside — this goes into the common batter for both cakes.",
+      timeNote: "5 min active",
+      ingredients: [
+        { amount: "1 tbsp", name: "orange zest" },
+        { amount: "43g", name: "Grand Marnier" },
+        { amount: "1 tsp", name: "orange blossom water or vanilla" }
+      ]
+    },
+    {
+      title: "Slice fruit and prep slurry juices",
+      instruction: "Mandoline-slice 2 blood oranges and 2 cara caras paper-thin (1.5–2mm), reserving the ends and removing seeds. Squeeze the reserved ends to get 1 tbsp combined citrus juice. Press the thawed pineapple firmly between paper towels to remove as much liquid as possible — frozen pineapple holds extra water that will make the cake soggy if not drained aggressively. Reserve 1 tbsp of the drained pineapple juice.",
+      timeNote: "15 min active",
+      ingredients: [
+        { amount: "2", name: "blood oranges" },
+        { amount: "2", name: "cara caras" },
+        { amount: "—", name: "thawed pineapple, drained hard" },
+        { amount: "1 tbsp", name: "reserved citrus juice" },
+        { amount: "1 tbsp", name: "reserved pineapple juice" }
+      ]
+    },
+    {
+      title: "Build both upside-down layers",
+      instruction: "FOR THE CITRUS PAN: Whisk 33g sugar into the 1 tbsp citrus juice until smooth, pour into Pan 1, tilt to spread. Arrange blood orange and cara cara slices in concentric overlapping circles, alternating colors. Press gently to seat. FOR THE PINEAPPLE PAN: Whisk 33g sugar into the 1 tbsp pineapple juice until smooth, pour into Pan 2, tilt to spread. Arrange pineapple in a tight overlapping pattern, packing densely with no large gaps.",
+      timeNote: "15 min active",
+      ingredients: [
+        { amount: "66g", name: "sugar (33g per pan)" },
+        { amount: "1 tbsp", name: "citrus juice" },
+        { amount: "1 tbsp", name: "pineapple juice" },
+        { amount: "—", name: "sliced citrus" },
+        { amount: "—", name: "drained pineapple" }
+      ]
+    },
+    {
+      title: "Whisk the dry ingredients",
+      instruction: "In a medium bowl, whisk together 238g cake flour, 8g (2 tsp) baking powder, and 2g (⅓ tsp) Morton's kosher salt until fully combined and lump-free.",
+      timeNote: "3 min active",
+      ingredients: [
+        { amount: "238g", name: "cake flour" },
+        { amount: "8g", name: "baking powder" },
+        { amount: "2g", name: "Morton's kosher salt" }
+      ]
+    },
+    {
+      title: "Beat eggs and sugar to ribbon",
+      instruction: "In the KitchenAid with whisk attachment, combine the 3 room-temp eggs and 197g sugar. Start on low to break up the eggs, then increase to high. Beat 5 full minutes until very pale, thick, and the mixture falls off the whisk in a slowly dissolving ribbon. Do not shortcut this — the ribbon is the leavening.",
+      timeNote: "5 min — start timer",
+      ingredients: [
+        { amount: "3", name: "large eggs (room temp)" },
+        { amount: "197g", name: "sugar" }
+      ]
+    },
+    {
+      title: "Stream in the olive oil",
+      instruction: "With the mixer still on high, slowly stream in 280g extra-virgin olive oil over 60–90 seconds. The mixture will thicken slightly and reduce in volume. Don't rush — too fast breaks the emulsion.",
+      timeNote: "90 sec active",
+      ingredients: [
+        { amount: "280g", name: "extra-virgin olive oil" }
+      ]
+    },
+    {
+      title: "Alternate flour and liquid",
+      instruction: "Reduce mixer speed to low. Add ⅓ of the flour mixture and mix briefly. Add half the Grand Marnier mixture and mix briefly. Add another ⅓ of the flour mixture and mix briefly. Add the rest of the Grand Marnier mixture and mix briefly. Add the last ⅓ of the flour mixture and mix until just combined. Stop the mixer and fold the batter several times by hand with a spatula, scraping the bottom and sides of the bowl.",
+      timeNote: "5 min active",
+      ingredients: [
+        { amount: "—", name: "flour mixture (Step 5)" },
+        { amount: "—", name: "Grand Marnier mixture (Step 2)" }
+      ]
+    },
+    {
+      title: "Divide and bake",
+      instruction: "Total batter is ~900g pourable. Tare your scale and pour 450g of batter into each pan from low height over the fruit layers — do not disturb the fruit. Smooth the tops gently. Do not tap the pans on the counter. Transfer to the preheated 400°F oven and immediately reduce temperature to 350°F. Both cakes bake on the same schedule. Start checking at 25 min: done when tops are golden brown, center is firm to touch, and a skewer comes out clean.",
+      timeNote: "28–35 min bake — start timer, first check at 25 min",
+      ingredients: [
+        { amount: "~900g", name: "batter (450g per pan)" }
+      ]
+    },
+    {
+      title: "Cool, invert, unmold",
+      instruction: "Transfer pans to wire racks and cool 15 minutes — set a timer. At 15 min, run a thin knife around the edge of each pan. Place a wire rack on top of each pan and flip in one confident motion (use oven mitts, the pans are hot). Lift the pan straight up, then carefully peel the parchment away from the fruit layer. If a fruit slice sticks to the parchment, gently lift it back onto the cake with a small offset spatula. The pineapple cake will look more rustic than the citrus cake — expected. Cool completely on the racks (45–60 min).",
+      timeNote: "15 min in pan + 45–60 min cooling",
+      ingredients: []
+    },
+    {
+      title: "Wrap and rest",
+      instruction: "Once both cakes are fully cool to the touch, wrap each tightly in plastic wrap. Rest at room temperature overnight — olive oil cakes peak in flavor and texture on day 2–3. Serve sliced, optionally with lightly sweetened plain whole-milk yogurt alongside.",
+      timeNote: "Overnight wait",
+      ingredients: [
+        { amount: "—", name: "plastic wrap" },
+        { amount: "optional", name: "plain whole-milk yogurt for serving" }
+      ]
+    }
+  ]
+};
+
+// ============================================================================
+// STATE — server is canonical
+// ============================================================================
+// These six variables are the browser's local copy of state. The first
+// three mirror what's on the server (currentStep, timers, nextTimerId).
+// The last three are purely local — they govern how this device decides
+// whether to repaint and how it displays online/offline status.
+//
+// lastVersion is the load-bearing one. The browser remembers what version
+// of the state it last saw. When it polls /state and receives a response,
+// it compares the server's version to lastVersion. Same number? Nothing
+// changed since last time, do nothing. Different number? Something changed
+// somewhere — probably the other device pushed an update — repaint the
+// screen with the new data.
+// ============================================================================
+let currentStep = 0;
+let timers = [];
+let nextTimerId = 1;
+let lastVersion = -1;       // -1 forces a repaint on the first successful fetch
+let isOnline = true;
+let selectedPresetMin = null;
+
+// ============================================================================
+// SERVER SYNC — the brain of the cross-device experience
+// ============================================================================
+// These two functions implement the entire sync system. fetchState pulls
+// fresh truth down from the server. pushState sends a local change up to
+// the server. Both run constantly: fetchState polls every 600ms, pushState
+// fires whenever the user does something (taps next, adds a timer, etc.).
+//
+// The version-check at the heart of fetchState is what makes this work.
+// Without it, two failure modes appear:
+//   1. Stale snapshot clobbers fresh local change — you tap pause on a
+//      timer, the next poll fires before your push lands, the server
+//      returns the pre-pause state, and your screen flips the timer back
+//      to running for a fraction of a second before correcting itself.
+//   2. Constant useless repainting — even when nothing changes, the
+//      browser would re-render every 600ms, which is wasteful and can
+//      cause visible flicker.
+// ============================================================================
+
+// Pull current state from the server. If the version has changed since
+// last fetch, repaint. Either way, update the online indicator.
+async function fetchState() {
+  try {
+    const r = await fetch("/state", { cache: "no-store" });
+    if (!r.ok) throw new Error("server error");
+    const s = await r.json();
+    setOnline(true);
+    if (s.version !== lastVersion) {
+      lastVersion = s.version;
+      currentStep = s.currentStep || 0;
+      timers = s.timers || [];
+      nextTimerId = s.nextTimerId || 1;
+      renderStep();
+      renderTimers();
+    }
+  } catch (e) {
+    setOnline(false);
+  }
+}
+
+// Send the current local state up to the server. Called by every
+// state-mutating user action (nextStep, prevStep, createTimer,
+// startSuggestedTimer, pauseTimer, resetTimer, deleteTimer). The server
+// merges the change in, bumps version, and returns the new state. We
+// update lastVersion so our own next fetchState doesn't trigger a
+// useless repaint of the change we just made ourselves.
+async function pushState() {
+  try {
+    const r = await fetch("/state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentStep, timers, nextTimerId })
+    });
+    if (!r.ok) throw new Error("push failed");
+    const s = await r.json();
+    lastVersion = s.version;
+    setOnline(true);
+  } catch (e) {
+    setOnline(false);
+  }
+}
+
+// Toggles the small green/red dot in the header. Only updates the DOM if
+// the status actually changed, to avoid pointless work on every poll.
+function setOnline(yes) {
+  if (yes === isOnline) return;
+  isOnline = yes;
+  const ind = document.getElementById("sync-indicator");
+  if (yes) {
+    ind.classList.remove("offline");
+    ind.title = "Synced";
+  } else {
+    ind.classList.add("offline");
+    ind.title = "Offline — server unreachable";
+  }
+}
+
+// ============================================================================
+// SPOTIFY — read path with smoothing, write path with optimistic UI
+// ============================================================================
+// Two flows here. The read path (fetchNowPlaying + renderSpotify) polls
+// the server every 5 seconds and updates the widget. The write path
+// (spotifyPrev / spotifyNext / spotifyPlayPause) reacts to user button
+// taps and uses two tricks to make Spotify feel responsive.
+//
+// Trick 1 — optimistic UI (in spotifyPlayPause): flip the play/pause icon
+// locally before the network call returns. The user sees instant feedback;
+// the network round-trip happens in parallel and the next fetch will
+// confirm or correct.
+//
+// Trick 2 — scheduled catch-up fetches (in spotifyControl): after sending
+// a command, schedule two extra /now-playing fetches at 350ms and 1200ms
+// instead of waiting for the regular 5-second poll. Spotify takes a moment
+// to acknowledge state changes; these two fetches catch the new state
+// quickly with built-in redundancy.
+//
+// Why no version field here, unlike the recipe sync? Because Spotify owns
+// its own state — the local server is just a pass-through. There's nothing
+// for a version number to attach to. The scheduled fetches are the
+// substitute for versioning in this flow.
+// ============================================================================
+
+let spotifyState = null;
+let spotifyLastFetchMs = 0;
+
+async function fetchNowPlaying() {
+  try {
+    const r = await fetch("/now-playing", { cache: "no-store" });
+    if (!r.ok) return;
+    spotifyState = await r.json();
+    spotifyLastFetchMs = Date.now();
+    renderSpotify();
+  } catch (e) {
+    // silent — Spotify is optional, never disrupt cooking if it's down
+  }
+}
+
+// Renders the Spotify widget using the latest state. Hides the widget
+// entirely when no track is loaded. The progress bar uses a small clever
+// trick: between server fetches (which only happen every 5s), it estimates
+// the current playback position locally based on how much wall-clock time
+// has elapsed since the last fetch. This makes the bar appear to move
+// smoothly second-by-second rather than jumping every 5 seconds.
+function renderSpotify() {
+  const widget = document.getElementById("spotify-widget");
+  const controls = document.getElementById("spotify-controls");
+
+  // Show whenever a track is loaded — even if paused — so the user can resume.
+  const hasTrack = spotifyState && spotifyState.track;
+
+  if (!hasTrack) {
+    widget.classList.remove("active");
+    controls.classList.remove("active");
+    return;
+  }
+
+  widget.classList.add("active");
+  controls.classList.add("active");
+
+  const art = document.getElementById("spotify-art");
+  if (spotifyState.art_url && art.src !== spotifyState.art_url) {
+    art.src = spotifyState.art_url;
+  }
+  document.getElementById("spotify-track").textContent = spotifyState.track || "—";
+  document.getElementById("spotify-artist").textContent = spotifyState.artist || "—";
+
+  // Toggle play/pause icon based on current state
+  const playIcon = document.getElementById("spotify-play-icon");
+  const pauseIcon = document.getElementById("spotify-pause-icon");
+  if (spotifyState.playing) {
+    playIcon.style.display = "none";
+    pauseIcon.style.display = "block";
+  } else {
+    playIcon.style.display = "block";
+    pauseIcon.style.display = "none";
+  }
+
+  // Smooth progress: estimate current ms based on last server fetch + elapsed wall time
+  if (spotifyState.duration_ms > 0) {
+    let currentMs = spotifyState.progress_ms || 0;
+    if (spotifyState.playing) {
+      const elapsedSinceFetch = Date.now() - spotifyLastFetchMs;
+      currentMs = Math.min(spotifyState.duration_ms, currentMs + elapsedSinceFetch);
+    }
+    const pct = (currentMs / spotifyState.duration_ms) * 100;
+    document.getElementById("spotify-progress-fill").style.width = pct + "%";
+  }
+}
+
+// The write path. Sends a control command to the server and schedules two
+// catch-up fetches to refresh the widget quickly. The 350ms / 1200ms pair
+// is belt-and-suspenders: 350 usually wins, 1200 catches it if Spotify is
+// slow that time.
+async function spotifyControl(action) {
+  try {
+    await fetch("/spotify-" + action, { method: "POST" });
+  } catch (e) {}
+  // Refresh now-playing soon to reflect the change
+  setTimeout(fetchNowPlaying, 350);
+  setTimeout(fetchNowPlaying, 1200);
+}
+function spotifyPrev() { spotifyControl("previous"); }
+function spotifyNext() { spotifyControl("next"); }
+
+// Optimistic UI: flip the icon before the network round-trip even starts.
+// The two scheduled fetches inside spotifyControl will either confirm the
+// flip or correct it back if something went wrong on Spotify's side.
+function spotifyPlayPause() {
+  const action = (spotifyState && spotifyState.playing) ? "pause" : "play";
+  if (spotifyState) {
+    spotifyState.playing = !spotifyState.playing;
+    renderSpotify();
+  }
+  spotifyControl(action);
+}
+
+// ============================================================================
+// STEP NAVIGATION — renderStep is the hub for the main panel
+// ============================================================================
+// renderStep paints the current cooking step onto the screen — title,
+// instruction, time note, ingredient tags, button states, progress dots.
+// It's called whenever something might have changed (next/back, server
+// sync, page load) and rebuilds the panel from scratch every time.
+//
+// renderStep leans on four helpers that each do one small job:
+//   - splitIntoSentences: breaks instruction prose into a numbered list
+//   - detectTimerFromTimeNote: pulls a duration out of "5 min — start timer"
+//   - formatSuggestedDuration: formats minutes as "28m" or "1h 30m"
+//   - renderProgressDots: paints the row of dots showing recipe progress
+//
+// DESIGN NOTE — three deep helpers, one shallow
+//   splitIntoSentences, detectTimerFromTimeNote, and renderProgressDots
+//   all hide real complexity behind simple interfaces — regex with
+//   abbreviation guards, regex with vocabulary constraints, and DOM
+//   generation respectively. formatSuggestedDuration is shallow: a few
+//   lines of arithmetic wrapped in a function. Not a problem at this
+//   size, but if you find yourself accumulating similar one-liners,
+//   that's when shallow modules start to hurt.
+// ============================================================================
+function renderStep() {
+  const step = RECIPE.steps[currentStep];
+  document.getElementById("recipe-name").textContent = RECIPE.name;
+  document.getElementById("recipe-meta").textContent = RECIPE.metaLine;
+  document.getElementById("step-counter").textContent =
+    `Step ${currentStep + 1} of ${RECIPE.steps.length}`;
+  document.getElementById("step-title").textContent = step.title;
+
+  // --- Render instruction as numbered sentences ---
+  // If the instruction has multiple sentences, show a numbered list.
+  // If it's a single sentence, just show the raw text.
+  const sentences = splitIntoSentences(step.instruction);
+  const instEl = document.getElementById("step-instruction");
+  if (sentences.length > 1) {
+    instEl.innerHTML = "<ol class='step-list'>" +
+      sentences.map(s => `<li>${escapeHtml(s)}</li>`).join("") +
+      "</ol>";
+  } else {
+    instEl.textContent = step.instruction;
+  }
+
+  // --- Render time note + suggested-timer button (when detectable) ---
+  // The time note is shown as plain text. If detectTimerFromTimeNote can
+  // pull a usable number of minutes out of it, an extra button appears
+  // next to the note that creates a timer with one tap (skipping the
+  // modal entirely).
+  const timeEl = document.getElementById("step-time");
+  timeEl.innerHTML = "";
+  if (step.timeNote) {
+    const span = document.createElement("span");
+    span.textContent = step.timeNote;
+    timeEl.appendChild(span);
+
+    const suggested = detectTimerFromTimeNote(step.timeNote);
+    if (suggested) {
+      const btn = document.createElement("button");
+      btn.className = "suggested-timer-btn";
+      btn.textContent = `▶ Start ${formatSuggestedDuration(suggested.minutes)} timer`;
+      btn.onclick = () => startSuggestedTimer(suggested.minutes, step.title);
+      timeEl.appendChild(btn);
+    }
+  }
+
+  // Ingredient tags. Hidden if the step has no ingredients.
+  const ingDiv = document.getElementById("ingredients-used");
+  const ingList = document.getElementById("ingredients-list");
+  if (step.ingredients && step.ingredients.length > 0) {
+    ingDiv.style.display = "block";
+    ingList.innerHTML = step.ingredients.map(ing =>
+      `<div class="ingredient-tag"><span class="amount">${escapeHtml(ing.amount)}</span>${escapeHtml(ing.name)}</div>`
+    ).join("");
+  } else {
+    ingDiv.style.display = "none";
+  }
+
+  // Button states. Prev disabled at step 0. Next changes label to "Done ✓"
+  // on the last step.
+  document.getElementById("prev-btn").disabled = currentStep === 0;
+  const nextBtn = document.getElementById("next-btn");
+  if (currentStep === RECIPE.steps.length - 1) {
+    nextBtn.textContent = "Done ✓";
+  } else {
+    nextBtn.textContent = "Next →";
+  }
+
+  renderProgressDots();
+  document.getElementById("step-instruction").scrollTop = 0;
+}
+
+// Splits a paragraph into individual sentences for display as a numbered
+// list. The naive approach — split on period-then-space — would break
+// "1.5 tablespoons" between the 1 and the 5, and would shred "tsp." and
+// "tbsp." into fragments. So this function temporarily replaces those
+// kinds of periods with a placeholder marker, does the split on real
+// sentence boundaries, then puts the real periods back.
+//
+// The protected-abbreviation list is hardcoded. If a recipe uses an
+// abbreviation outside this list (like "fl. oz." or temperature units
+// like "350°F."), it can split mid-sentence. The import pipeline either
+// has to normalize text into this dialect or this list has to grow.
+function splitIntoSentences(text) {
+  if (!text) return [];
+  const protectedAbbr = ["tsp", "tbsp", "oz", "lb", "min", "hr", "g", "kg", "ml", "L"];
+  let working = text;
+  // Protect "1.5" -> "1<DOT>5"
+  working = working.replace(/(\d)\.(\d)/g, "$1<DOT>$2");
+  protectedAbbr.forEach(abbr => {
+    const re = new RegExp(`\\b${abbr}\\.`, "g");
+    working = working.replace(re, `${abbr}<DOT>`);
+  });
+  // Split on sentence-ending punctuation followed by space + capital letter
+  const parts = working.split(/(?<=[.!?])\s+(?=[A-Z])/);
+  return parts
+    .map(p => p.replace(/<DOT>/g, ".").trim())
+    .filter(p => p.length > 0);
+}
+
+// Tries to extract a usable duration out of the timeNote string. Returns
+// {minutes} on success, null on failure. Failure is fine — it just means
+// no suggested-timer button appears for that step. Examples:
+//   "5 min — start timer" -> 5
+//   "28–35 min bake — first check at 25 min" -> 28 (lower bound)
+//   "1 hr" -> 60
+//   "90 sec active" -> null (vocabulary doesn't include sec)
+//   "Overnight wait" -> null (no digit)
+//
+// DESIGN NOTE — vocabulary constraints
+//   This function only knows about "min" and "hr". Anything else — "half
+//   an hour", "30 seconds", "two and a half hours" — silently produces
+//   no suggestion. That's a real input contract for kitchen_import.py.
+function detectTimerFromTimeNote(note) {
+  if (!note) return null;
+  const lower = note.toLowerCase();
+  const minuteMatch = lower.match(/(\d+)(?:\s*[-–]\s*(\d+))?\s*min\b/);
+  if (minuteMatch) {
+    const minutes = parseInt(minuteMatch[1]);
+    if (minutes >= 1 && minutes <= 480) return { minutes };
+  }
+  const hourMatch = lower.match(/(\d+)\s*(?:hr|hour)\b/);
+  if (hourMatch) return { minutes: parseInt(hourMatch[1]) * 60 };
+  return null;
+}
+
+// Pure formatting. 90 minutes -> "1h 30m", 60 -> "1h", 28 -> "28m".
+function formatSuggestedDuration(minutes) {
+  if (minutes >= 60) {
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  }
+  return `${minutes}m`;
+}
+
+// Creates a timer from a suggestion button tap. Auto-names it from the
+// step title (first 3 words) so the user doesn't need to type anything.
+function startSuggestedTimer(minutes, stepTitle) {
+  const durationMs = minutes * 60 * 1000;
+  const name = (stepTitle || "Timer").split(" ").slice(0, 3).join(" ");
+  timers.push({
+    id: nextTimerId++,
+    name,
+    duration: durationMs,
+    endTime: Date.now() + durationMs,
+    paused: false,
+    pausedRemaining: null
+  });
+  renderTimers();
+  pushState();
+}
+
+// Paints the row of progress dots at the bottom — one per step, colored
+// by whether that step is done, current, or upcoming.
+function renderProgressDots() {
+  const container = document.getElementById("progress-dots");
+  container.innerHTML = RECIPE.steps.map((_, i) => {
+    let cls = "dot";
+    if (i < currentStep) cls += " complete";
+    else if (i === currentStep) cls += " current";
+    return `<div class="${cls}"></div>`;
+  }).join("");
+}
+
+// Step navigation. Both functions follow the same pattern: mutate the
+// local state, repaint, then push to the server.
+function nextStep() {
+  if (currentStep < RECIPE.steps.length - 1) {
+    currentStep++;
+    renderStep();
+    pushState();
+  }
+}
+
+function prevStep() {
+  if (currentStep > 0) {
+    currentStep--;
+    renderStep();
+    pushState();
+  }
+}
+
+// ============================================================================
+// TIMERS — model, mutation, render
+// ============================================================================
+// Timer model: each timer is an object with six fields.
+//   id             — unique number for finding this timer later
+//   name           — what shows on the card
+//   duration       — original length in ms (used by reset)
+//   endTime        — wall-clock ms when this timer fires (canonical when running)
+//   paused         — boolean flag
+//   pausedRemaining — ms left at moment of pause (canonical when paused)
+//
+// The paused/pausedRemaining swap is doing real work. A running timer
+// doesn't need to store remaining time — it's always (endTime - now). But
+// once paused, that math breaks because wall-clock time keeps advancing
+// even though the timer shouldn't be counting down. So at pause, capture
+// remaining; at resume, compute a new endTime from current-time + remaining.
+//
+// Five functions mutate the timer list (createTimer, startSuggestedTimer
+// above, pauseTimer, resetTimer, deleteTimer). All five end with the
+// same two-step finish: renderTimers + pushState. This is the same
+// "repaint locally, then publish" pattern the step-navigation functions use.
+// ============================================================================
+
+function openTimerModal() {
+  document.getElementById("timer-modal").classList.add("active");
+  document.getElementById("timer-name-input").value = "";
+  document.getElementById("timer-custom-min").value = "";
+  selectedPresetMin = null;
+  document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("selected"));
+  setTimeout(() => document.getElementById("timer-name-input").focus(), 50);
+}
+
+function closeTimerModal() {
+  document.getElementById("timer-modal").classList.remove("active");
+}
+
+// Wire up the preset duration buttons (1m, 5m, 10m, etc). Tapping one
+// selects it and clears any custom-minutes value. The selectedPresetMin
+// variable tracks which (if any) is currently chosen.
+document.querySelectorAll(".preset-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("selected"));
+    btn.classList.add("selected");
+    selectedPresetMin = parseInt(btn.dataset.min);
+    document.getElementById("timer-custom-min").value = "";
+  });
+});
+
+// Conversely, typing in the custom-minutes input clears any selected preset.
+document.getElementById("timer-custom-min").addEventListener("input", () => {
+  document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("selected"));
+  selectedPresetMin = null;
+});
+
+// Creates a timer from the modal. Custom minutes wins over preset if
+// both are set. Defaults the name to "Timer" if the user didn't type one.
+function createTimer() {
+  const name = document.getElementById("timer-name-input").value.trim() || "Timer";
+  const customMin = parseFloat(document.getElementById("timer-custom-min").value);
+  const minutes = customMin > 0 ? customMin : selectedPresetMin;
+  if (!minutes || minutes <= 0) {
+    document.getElementById("timer-custom-min").focus();
+    return;
+  }
+  const durationMs = minutes * 60 * 1000;
+  timers.push({
+    id: nextTimerId++,
+    name,
+    duration: durationMs,
+    endTime: Date.now() + durationMs,
+    paused: false,
+    pausedRemaining: null
+  });
+  closeTimerModal();
+  renderTimers();
+  pushState();
+}
+
+// Toggle pause/resume. The two branches are mirror images of each other:
+// pause captures remaining time; resume uses captured remaining to set
+// a new endTime. Only one of paused/pausedRemaining is meaningful at a
+// time; the paused flag tells the rendering code which to trust.
+function pauseTimer(id) {
+  const t = timers.find(t => t.id === id);
+  if (!t) return;
+  if (t.paused) {
+    t.endTime = Date.now() + t.pausedRemaining;
+    t.paused = false;
+    t.pausedRemaining = null;
+  } else {
+    t.pausedRemaining = t.endTime - Date.now();
+    t.paused = true;
+  }
+  renderTimers();
+  pushState();
+}
+
+// Removes a timer entirely. Also removes any alerting state for it
+// (otherwise a deleted-while-beeping timer would leave a stale entry
+// in the alertingTimers map).
+function deleteTimer(id) {
+  timers = timers.filter(t => t.id !== id);
+  alertingTimers.delete(id);
+  renderTimers();
+  pushState();
+}
+
+// Rewinds a timer back to a fresh full duration from now. Same cleanup
+// of alerting state as deleteTimer.
+function resetTimer(id) {
+  const t = timers.find(t => t.id === id);
+  if (!t) return;
+  t.endTime = Date.now() + t.duration;
+  t.paused = false;
+  t.pausedRemaining = null;
+  alertingTimers.delete(id);
+  renderTimers();
+  pushState();
+}
+
+// Format ms as "h:mm:ss" or "m:ss" depending on whether it's >= 1 hour.
+// Math.ceil rounds up so a 4.3 second remainder shows as "5" rather than
+// "4" — feels more accurate to a human counting down.
+function formatTime(ms) {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+// Repaints all timer cards. Called every 1000ms by the heartbeat so
+// countdowns visibly tick down. Each card's CSS class is computed from
+// its remaining time:
+//   <= 0 ms        -> "done"     (green, pulsing)
+//   < 60000 ms     -> "warning"  (amber)
+//   otherwise      -> "running"  (orange)
+function renderTimers() {
+  const container = document.getElementById("timers-container");
+  if (!timers || timers.length === 0) {
+    container.innerHTML = '<div class="empty-timers">No timers running.<br>Tap + New Timer to start one.</div>';
+    return;
+  }
+  const now = Date.now();
+  container.innerHTML = timers.map(t => {
+    const remaining = t.paused ? t.pausedRemaining : (t.endTime - now);
+    let cls = "timer";
+    if (remaining <= 0) cls += " done";
+    else if (remaining < 60000) cls += " warning";
+    else if (!t.paused) cls += " running";
+    const display = remaining <= 0 ? "DONE" : formatTime(remaining);
+    return `
+      <div class="${cls}">
+        <div class="timer-row">
+          <div class="timer-name">${escapeHtml(t.name)}</div>
+          <div class="timer-display">${display}</div>
+        </div>
+        <div class="timer-controls">
+          <button class="timer-btn" onclick="pauseTimer(${t.id})">${t.paused ? "Resume" : "Pause"}</button>
+          <button class="timer-btn" onclick="resetTimer(${t.id})">Reset</button>
+          <button class="timer-btn danger" onclick="deleteTimer(${t.id})">×</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+// Escapes user-supplied strings before injecting them into innerHTML.
+// Without this, a timer named "<script>alert(1)</script>" would actually
+// run script. Used everywhere we construct HTML from string concatenation.
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+// ============================================================================
+// AUDIO ALERT — beep + flash + vibrate when a timer hits zero
+// ============================================================================
+// The Web Audio API lets us synthesize sound on the fly without loading
+// any audio files. Two oscillators per chime (a base sine wave and an
+// octave harmonic) get mixed through a gain node with a short attack
+// and long release, producing a "ding" character. beep() chains three
+// chimes at C5, E5, G5 — an arpeggio that's attention-getting without
+// being harsh.
+//
+// Browsers refuse to play sound until the user has interacted with the
+// page at least once (touch or click). ensureAudio() initializes the
+// AudioContext lazily and resumes it if the browser has suspended it.
+// The two document.addEventListener("once") lines at the bottom of this
+// section are what kick that off on first interaction.
+// ============================================================================
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) {
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) {}
+  }
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+}
+
+// Play a single chime tone with controlled envelope.
+function playChime(freq, startTime, duration) {
+  if (!audioCtx) return;
+  const osc1 = audioCtx.createOscillator();
+  const osc2 = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+
+  osc1.type = "sine";
+  osc1.frequency.value = freq;
+  osc2.type = "sine";
+  osc2.frequency.value = freq * 2; // octave harmonic
+  osc1.connect(gain);
+  osc2.connect(gain);
+  gain.connect(audioCtx.destination);
+
+  // Envelope: quick attack, sustained body, long release for a "ding" feel
+  gain.gain.setValueAtTime(0, startTime);
+  gain.gain.linearRampToValueAtTime(0.5, startTime + 0.02);
+  gain.gain.linearRampToValueAtTime(0.4, startTime + 0.1);
+  gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+
+  osc1.start(startTime);
+  osc2.start(startTime);
+  osc1.stop(startTime + duration);
+  osc2.stop(startTime + duration);
+}
+
+// Three-tone ascending arpeggio (C5-E5-G5).
+function beep() {
+  try {
+    ensureAudio();
+    if (!audioCtx) return;
+    const t = audioCtx.currentTime;
+    playChime(523.25, t,        0.5);  // C5
+    playChime(659.25, t + 0.18, 0.5);  // E5
+    playChime(783.99, t + 0.36, 0.7);  // G5
+  } catch (e) {}
+}
+
+// Wake the audio context on first user interaction.
+document.addEventListener("touchstart", ensureAudio, { once: true });
+document.addEventListener("click", ensureAudio, { once: true });
+
+// alertingTimers is purely local state — never synced to the server,
+// never shared with the other device. It tracks which timers on THIS
+// device are currently beeping and when each last beeped.
+//
+// DESIGN NOTE — local state vs canonical state
+//   This is the cleanest example in the codebase of separating shared
+//   state from device-local state. Whether a timer exists is shared
+//   (lives in `timers`, syncs across devices). Whether THIS device has
+//   beeped twice in the last six seconds for that timer is local
+//   (lives in alertingTimers, never leaves the browser). Syncing the
+//   alerting state across devices would be actively bad — one device
+//   might be muted, in a different room, etc.
+//   When you write kitchen_import.py, ask the same question for any
+//   new state it generates: shared (sync) or local (don't)?
+const alertingTimers = new Map(); // id -> last beep timestamp
+
+// Visual backup for the audio alert. Briefly tints the screen green
+// in case audio is muted or playing through speakers the user can't hear.
+function flashScreen() {
+  const flash = document.createElement("div");
+  flash.style.cssText = "position:fixed;inset:0;background:rgba(74,222,128,0.25);pointer-events:none;z-index:9999;animation:flashOut 0.6s ease-out forwards;";
+  document.body.appendChild(flash);
+  setTimeout(() => flash.remove(), 700);
+}
+
+// Runs every 1000ms (called from the heartbeat below). For each finished
+// timer, beep + flash + vibrate every 3 seconds until the user dismisses
+// or pauses it. The 3-second interval is what makes this an alarm rather
+// than a one-shot notification.
+function checkTimers() {
+  const now = Date.now();
+  timers.forEach(t => {
+    const isDone = !t.paused && t.endTime <= now;
+
+    if (isDone) {
+      const lastAlert = alertingTimers.get(t.id);
+      // Beep on first detection OR every 3 seconds after
+      if (!lastAlert || (now - lastAlert) >= 3000) {
+        beep();
+        flashScreen();
+        // Buzz on supported devices (Android; iOS ignores)
+        if (navigator.vibrate) {
+          navigator.vibrate([200, 100, 200, 100, 200]);
+        }
+        alertingTimers.set(t.id, now);
+      }
+    } else {
+      // Timer is no longer done (deleted or reset) — stop alerting
+      alertingTimers.delete(t.id);
+    }
+  });
+
+  // Garbage-collect alerts for timers that no longer exist (e.g. pulled
+  // by a state sync from the other device).
+  const liveIds = new Set(timers.map(t => t.id));
+  for (const id of alertingTimers.keys()) {
+    if (!liveIds.has(id)) alertingTimers.delete(id);
+  }
+}
+
+// ============================================================================
+// CLOCK
+// ============================================================================
+// The clock in the header. Updates every 1000ms via the heartbeat. 12-hour
+// format with AM/PM, padded minutes.
+// ============================================================================
+function updateClock() {
+  const d = new Date();
+  const h = d.getHours();
+  const m = String(d.getMinutes()).padStart(2, "0");
+  const ampm = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  document.getElementById("clock").textContent = `${h12}:${m} ${ampm}`;
+}
+
+// ============================================================================
+// KEYBOARD SHORTCUTS — laptop-only conveniences
+// ============================================================================
+// Right arrow / Space = next step. Left arrow = previous. T = open timer
+// modal. Inside the modal, Enter creates the timer and Escape cancels.
+// Phone users never trigger these (no keyboard); they're laptop niceties.
+// ============================================================================
+document.addEventListener("keydown", e => {
+  if (document.getElementById("timer-modal").classList.contains("active")) {
+    if (e.key === "Enter") createTimer();
+    if (e.key === "Escape") closeTimerModal();
+    return;
+  }
+  if (e.key === "ArrowRight" || e.key === " ") { e.preventDefault(); nextStep(); }
+  if (e.key === "ArrowLeft") { e.preventDefault(); prevStep(); }
+  if (e.key === "t" || e.key === "T") openTimerModal();
+});
+
+// ============================================================================
+// WAKE LOCK — keep the phone screen awake during cooking
+// ============================================================================
+// Phones aggressively dim and lock the screen to save battery. That's the
+// wrong default during cooking — your hands are full and you don't want
+// to keep tapping the screen to wake it. The Wake Lock API lets a page
+// request that the screen stay on. Browser support varies (Chrome yes,
+// older iOS no); failures are silently ignored.
+//
+// The lock can be lost when the tab goes into the background (the user
+// switches apps), so we re-request it whenever the page becomes visible
+// again.
+// ============================================================================
+let wakeLock = null;
+async function requestWakeLock() {
+  try {
+    if ("wakeLock" in navigator) {
+      wakeLock = await navigator.wakeLock.request("screen");
+    }
+  } catch (e) {}
+}
+document.addEventListener("touchstart", requestWakeLock, { once: true });
+document.addEventListener("click", requestWakeLock, { once: true });
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") requestWakeLock();
+});
+
+// ============================================================================
+// PHONE-LAYOUT WIDGET REPOSITION — the JS bridge CSS can't cross
+// ============================================================================
+// CSS can change size, color, position, and visibility, but it cannot move
+// an element from one parent container to another in the live document.
+// Once the HTML structure is rendered, the parent-child relationships are
+// fixed unless JavaScript actively rearranges them.
+//
+// This page wants the Spotify widget in two genuinely different places:
+//   - Laptop: in .header-right, next to the clock (compact)
+//   - Phone:  in .app, just above the big control buttons (full-width)
+//
+// applyPhoneLayout is what bridges that gap. It runs at page load and on
+// every window resize, checks the current width, and either appends the
+// widget into .app or moves it back into .header-right. It also toggles
+// a 'phone-mode' class on the body — the CSS uses that class to apply
+// phone-specific styles to the relocated widget.
+//
+// DESIGN NOTE — coupled operations
+//   The DOM move and the body class toggle both have to happen together.
+//   Move without class = widget in right place but styled wrongly.
+//   Class without move = correct styling on a widget in the wrong place.
+//   Keeping these two operations adjacent inside one function prevents
+//   them from drifting out of sync as the file grows.
+// ============================================================================
+function applyPhoneLayout() {
+  const isPhone = window.matchMedia("(max-width: 768px)").matches;
+  const widget = document.getElementById("spotify-widget");
+  const headerRight = document.querySelector(".header-right");
+  const app = document.querySelector(".app");
+  if (!widget || !headerRight || !app) return;
+
+  if (isPhone) {
+    document.body.classList.add("phone-mode");
+    // Move widget to be a direct child of .app (so flex order applies)
+    if (widget.parentElement !== app) {
+      app.appendChild(widget);
+    }
+  } else {
+    document.body.classList.remove("phone-mode");
+    // Restore widget into .header-right (before .clock-block)
+    const clockBlock = document.querySelector(".clock-block");
+    if (widget.parentElement !== headerRight && clockBlock) {
+      headerRight.insertBefore(widget, clockBlock);
+    }
+  }
+}
+window.addEventListener("resize", applyPhoneLayout);
+
+// ============================================================================
+// INIT — what runs at page load
+// ============================================================================
+// Two phases. First, the boot sequence: six functions called once to set
+// up the page in a viewable state. Second, three setIntervals running
+// at three different cadences forever after.
+//
+// The three cadences exist for different reasons:
+//   - 600ms  fetchState     fast cross-device sync; half a second is
+//                           roughly the threshold below which lag stops
+//                           feeling like lag
+//   - 5000ms fetchNowPlaying slow because Spotify rate-limits and the
+//                           song isn't changing every second; the 4-second
+//                           server-side cache makes this even cheaper
+//   - 1000ms local-only tick countdowns + clock + smooth Spotify progress;
+//                           no network at all, so this never gets blocked
+//                           by network slowness
+//
+// The three loops are independent — none waits for the others. If the
+// network hangs, the 1000ms tick keeps timer countdowns visibly moving.
+// ============================================================================
+applyPhoneLayout();
+renderStep();
+renderTimers();
+updateClock();
+fetchState();
+fetchNowPlaying();
+
+// Recipe state — fast polling
+setInterval(fetchState, 600);
+
+// Spotify — slower polling (server-side cache makes this cheap regardless)
+setInterval(fetchNowPlaying, 5000);
+
+// Local UI tick — countdowns, clock, smooth Spotify progress
+setInterval(() => {
+  renderTimers();
+  checkTimers();
+  updateClock();
+  renderSpotify();
+}, 1000);
+</script>
+</body>
+</html>

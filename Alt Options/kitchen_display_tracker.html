@@ -1,0 +1,1841 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Kitchen">
+<title>Kitchen Display</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  :root {
+    --bg: #0e0e10;
+    --bg-card: #1a1a1e;
+    --bg-elevated: #25252b;
+    --border: #2e2e35;
+    --text: #f0efea;
+    --text-dim: #8a8a92;
+    --text-faint: #4a4a52;
+    --accent: #ff8c42;
+    --accent-dim: #b86530;
+    --warn: #ffb84d;
+    --done: #4ade80;
+    --danger: #f87171;
+    --spotify: #1ed760;
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
+    font-feature-settings: "ss01", "cv11";
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* ============================================
+     LAYOUT — default is landscape; portrait kicks in via media query
+     ============================================ */
+  .app {
+    display: grid;
+    grid-template-columns: 1fr clamp(280px, 26vw, 460px);
+    grid-template-rows: auto 1fr auto;
+    height: 100vh;            /* fallback for older browsers */
+    height: 100dvh;           /* dynamic viewport — respects iOS chrome/home indicator */
+    gap: 14px;
+    padding: 14px;
+    padding-bottom: max(14px, env(safe-area-inset-bottom));
+  }
+
+  /* HEADER */
+  .header {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 0 4px;
+  }
+  .title-block { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .title {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .title .accent { color: var(--accent); }
+  .meta-line {
+    font-size: 13px;
+    color: var(--text-dim);
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+
+  /* SPOTIFY WIDGET */
+  .spotify-widget {
+    display: none;
+    align-items: center;
+    gap: 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 16px 10px 10px;
+    min-width: 260px;
+    max-width: 360px;
+  }
+  .spotify-widget.active { display: flex; }
+  .spotify-art {
+    width: 56px;
+    height: 56px;
+    border-radius: 6px;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: var(--bg-elevated);
+  }
+  .spotify-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .spotify-track {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+  }
+  .spotify-artist {
+    font-size: 12px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+  }
+  .spotify-progress {
+    margin-top: 5px;
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .spotify-progress-fill {
+    height: 100%;
+    background: var(--spotify);
+    width: 0%;
+    border-radius: 2px;
+    transition: width 1s linear;
+  }
+
+  .clock-block {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .clock {
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
+    font-size: 18px;
+    letter-spacing: 0.02em;
+  }
+  .sync-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--done);
+    transition: background 0.3s;
+  }
+  .sync-indicator.offline { background: var(--danger); }
+
+  /* MAIN STEP AREA */
+  .main {
+    background: var(--bg-card);
+    border-radius: 16px;
+    padding: 36px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .step-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 10px;
+    gap: 12px;
+  }
+  .step-counter {
+    font-size: 13px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: 700;
+  }
+  .step-time {
+    font-size: 13px;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    font-weight: 700;
+  }
+  .step-title {
+    font-size: 38px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin-bottom: 22px;
+    line-height: 1.05;
+    color: var(--text);
+  }
+  .step-instruction {
+    font-size: 22px;
+    line-height: 1.5;
+    color: var(--text);
+    flex-grow: 1;
+    overflow-y: auto;
+    padding-right: 8px;
+  }
+  .step-instruction::-webkit-scrollbar { width: 8px; }
+  .step-instruction::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  .ingredients-used {
+    margin-top: 22px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+  }
+  .ingredients-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 10px;
+    font-weight: 700;
+  }
+  .ingredients-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .ingredient-tag {
+    background: var(--bg-elevated);
+    padding: 7px 13px;
+    border-radius: 8px;
+    font-size: 15px;
+  }
+  .ingredient-tag .amount {
+    color: var(--accent);
+    font-weight: 700;
+    margin-right: 6px;
+  }
+
+  /* TIMER PANEL */
+  .timer-panel {
+    background: var(--bg-card);
+    border-radius: 16px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+  }
+  .panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+  }
+  .panel-title {
+    font-size: 12px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: 700;
+  }
+  .add-timer-btn {
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-family: inherit;
+  }
+  .add-timer-btn:active { background: #ffa05c; }
+
+  #timers-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .timer {
+    background: var(--bg-elevated);
+    border-radius: 12px;
+    padding: 12px 16px;
+    border-left: 4px solid var(--accent-dim);
+    transition: background 0.3s;
+  }
+  .timer.running { border-left-color: var(--accent); }
+  .timer.done {
+    border-left-color: var(--done);
+    animation: pulse 1.5s infinite;
+  }
+  .timer.warning { border-left-color: var(--warn); }
+
+  @keyframes pulse {
+    0%, 100% { background: var(--bg-elevated); }
+    50% { background: rgba(74, 222, 128, 0.18); }
+  }
+
+  .timer-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }
+  .timer-name {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .timer-display {
+    font-size: 22px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+    letter-spacing: -0.02em;
+  }
+  .timer.done .timer-display { color: var(--done); }
+  .timer.warning .timer-display { color: var(--warn); }
+
+  .timer-controls {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .timer-btn {
+    flex: 1;
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-family: inherit;
+  }
+  .timer-btn:active { background: var(--border); color: var(--text); }
+  .timer-btn.danger:active { background: var(--danger); color: var(--bg); border-color: var(--danger); }
+
+  .empty-timers {
+    color: var(--text-faint);
+    font-size: 14px;
+    text-align: center;
+    padding: 20px;
+    font-style: italic;
+  }
+
+  /* SPOTIFY TRANSPORT CONTROLS (phone remote only) */
+  .spotify-controls {
+    display: none;
+    gap: 14px;
+    justify-content: center;
+    align-items: center;
+    padding: 4px 0;
+  }
+  .spotify-controls.active { display: flex; }
+  .spotify-btn {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: transform 0.1s;
+    font-family: inherit;
+  }
+  .spotify-btn:active { transform: scale(0.92); }
+  .spotify-btn svg { width: 24px; height: 24px; }
+  .spotify-btn.play {
+    width: 68px;
+    height: 68px;
+    background: var(--spotify);
+    border-color: var(--spotify);
+    color: var(--bg);
+  }
+  .spotify-btn.play svg { width: 30px; height: 30px; }
+
+  /* CONTROLS BAR */
+  .controls {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 12px;
+    padding: 0 4px;
+    align-items: center;
+  }
+  .nav-btn {
+    background: var(--bg-card);
+    color: var(--text);
+    border: none;
+    border-radius: 12px;
+    padding: 18px 32px;
+    font-size: 18px;
+    font-weight: 800;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    min-height: 60px;
+    font-family: inherit;
+  }
+  .nav-btn:active:not(:disabled) { background: var(--bg-elevated); }
+  .nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .nav-btn.next {
+    background: var(--accent);
+    color: var(--bg);
+    flex: 1;
+  }
+  .nav-btn.next:active { background: #ffa05c; }
+  .nav-btn.prev { min-width: 120px; }
+
+  .progress-dots {
+    display: flex;
+    gap: 6px;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    padding: 0 16px;
+    flex-wrap: wrap;
+  }
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--border);
+    transition: all 0.2s;
+  }
+  .dot.complete { background: var(--accent-dim); }
+  .dot.current { background: var(--accent); transform: scale(1.5); }
+
+  /* TIMER MODAL */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.78);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+  .modal-overlay.active { display: flex; }
+  .modal {
+    background: var(--bg-card);
+    border-radius: 16px;
+    padding: 28px;
+    width: 90%;
+    max-width: 480px;
+    border: 1px solid var(--border);
+  }
+  .modal h2 {
+    font-size: 22px;
+    margin-bottom: 20px;
+    font-weight: 800;
+  }
+  .modal label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 6px;
+    font-weight: 700;
+  }
+  .modal input {
+    width: 100%;
+    background: var(--bg-elevated);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    font-size: 17px;
+    margin-bottom: 16px;
+    font-family: inherit;
+  }
+  .modal input:focus { outline: none; border-color: var(--accent); }
+  .duration-presets {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .preset-btn {
+    background: var(--bg-elevated);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 6px;
+    font-size: 14px;
+    cursor: pointer;
+    font-weight: 700;
+    font-family: inherit;
+  }
+  .preset-btn:active { background: var(--border); }
+  .preset-btn.selected {
+    background: var(--accent);
+    color: var(--bg);
+    border-color: var(--accent);
+  }
+  .modal-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .modal-btn {
+    flex: 1;
+    padding: 16px;
+    border-radius: 8px;
+    border: none;
+    font-size: 15px;
+    font-weight: 800;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-family: inherit;
+  }
+  .modal-btn.cancel { background: var(--bg-elevated); color: var(--text-dim); }
+  .modal-btn.confirm { background: var(--accent); color: var(--bg); }
+
+  /* ============================================
+     PORTRAIT — primary layout for 27" monitor + phone
+     ============================================ */
+  @media (orientation: portrait) {
+    .app {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto auto 1fr auto;
+    }
+    .timer-panel {
+      grid-row: 2;
+      max-height: 32vh;
+    }
+    #timers-container {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+    }
+    .main {
+      grid-row: 3;
+    }
+  }
+
+  /* ============================================
+     27" MONITOR IN PORTRAIT — bump up text for cooking-distance reading
+     (orientation: portrait + non-phone width)
+     ============================================ */
+  @media (orientation: portrait) and (min-width: 900px) {
+    .app { padding: 22px; gap: 18px; }
+    .title { font-size: 32px; }
+    .meta-line { font-size: 17px; }
+    .clock { font-size: 24px; }
+
+    .spotify-widget {
+      min-width: 340px;
+      max-width: 460px;
+      padding: 14px 20px 14px 14px;
+      gap: 16px;
+    }
+    .spotify-art { width: 80px; height: 80px; border-radius: 8px; }
+    .spotify-track { font-size: 18px; max-width: 320px; }
+    .spotify-artist { font-size: 14px; max-width: 320px; }
+    .spotify-progress { height: 4px; margin-top: 8px; }
+
+    .main { padding: 48px; border-radius: 20px; }
+    .step-meta { margin-bottom: 14px; }
+    .step-counter { font-size: 16px; }
+    .step-time { font-size: 16px; }
+    .step-title { font-size: 64px; margin-bottom: 32px; }
+    .step-instruction { font-size: 34px; line-height: 1.45; }
+    .ingredients-label { font-size: 14px; margin-bottom: 14px; }
+    .ingredient-tag { font-size: 19px; padding: 10px 18px; }
+
+    .timer-panel { padding: 24px; max-height: 28vh; }
+    .panel-title { font-size: 16px; }
+    .add-timer-btn { font-size: 16px; padding: 12px 22px; }
+    .timer { padding: 18px 22px; }
+    .timer-name { font-size: 22px; }
+    .timer-display { font-size: 32px; }
+    .timer-btn { font-size: 14px; padding: 12px; }
+
+    .nav-btn {
+      font-size: 24px;
+      padding: 26px 40px;
+      min-height: 84px;
+      border-radius: 16px;
+    }
+    .nav-btn.prev { min-width: 200px; }
+    .dot { width: 14px; height: 14px; }
+  }
+
+  /* ============================================
+     PHONE — primary controller, compact portrait
+     ============================================ */
+  @media (max-width: 768px) {
+    /* Phone = pure remote control. Override grid with flex so the big
+       buttons can grow to fill whatever vertical space remains. */
+    .app {
+      display: flex;
+      flex-direction: column;
+      padding: 10px;
+      padding-bottom: max(10px, env(safe-area-inset-bottom));
+      gap: 8px;
+    }
+    .header {
+      flex: 0 0 auto;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .title-block { flex: 1; min-width: 0; order: 1; }
+    .title { font-size: 17px; }
+    .meta-line { font-size: 11px; }
+    .header-right {
+      order: 2;
+      gap: 10px;
+      width: 100%;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .clock { font-size: 14px; order: 2; }
+    .clock-block { order: 2; }
+    .spotify-widget {
+      min-width: 0;
+      max-width: 100%;
+      flex: 1;
+      padding: 8px 12px 8px 8px;
+      gap: 10px;
+      order: 1;
+    }
+    .spotify-art { width: 44px; height: 44px; }
+    .spotify-track { font-size: 13px; max-width: none; }
+    .spotify-artist { font-size: 11px; max-width: none; }
+    .spotify-progress { margin-top: 4px; }
+
+    .timer-panel {
+      flex: 0 0 auto;
+      max-height: 24vh;
+      padding: 12px;
+    }
+    #timers-container {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+
+    /* Compact step-info card — show step counter + title only, no instructions */
+    .main {
+      flex: 0 0 auto;
+      padding: 14px 16px;
+      border-radius: 12px;
+    }
+    .step-meta { margin-bottom: 6px; }
+    .step-counter, .step-time { font-size: 11px; }
+    .step-title { font-size: 20px; margin-bottom: 0; line-height: 1.2; }
+    .step-instruction { display: none; }
+    .ingredients-used { display: none; }
+
+    /* Spotify transport controls — only on phone, only when active */
+    .spotify-controls { flex: 0 0 auto; }
+
+    /* HUGE remote buttons — fill remaining vertical space */
+    .controls {
+      flex: 1;
+      min-height: 160px;
+      gap: 10px;
+      padding: 0;
+      align-items: stretch;
+    }
+    .nav-btn {
+      padding: 0 12px;
+      font-size: 24px;
+      font-weight: 800;
+      min-height: 0;
+      height: auto;
+      border-radius: 16px;
+    }
+    .nav-btn.prev {
+      flex: 0 0 30%;
+      min-width: 0;
+    }
+    .nav-btn.next {
+      flex: 1;
+      font-size: 28px;
+    }
+    .progress-dots { display: none; }
+  }
+  /* ============================================
+     BAKE DIARY — last-bake banner + rating modal + history view
+     ============================================ */
+
+  /* Last-bake banner — appears at top of step area on big screens */
+  .last-bake-banner {
+    display: none;
+    background: linear-gradient(180deg, rgba(255,140,66,0.12) 0%, rgba(255,140,66,0.04) 100%);
+    border: 1px solid rgba(255,140,66,0.25);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin-bottom: 18px;
+    gap: 14px;
+    align-items: center;
+  }
+  .last-bake-banner.active { display: flex; }
+  .last-bake-icon { font-size: 22px; line-height: 1; flex-shrink: 0; }
+  .last-bake-content { flex: 1; min-width: 0; }
+  .last-bake-meta {
+    font-size: 12px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .last-bake-meta .stars { color: var(--accent); margin-left: 8px; letter-spacing: 0; }
+  .last-bake-notes {
+    font-size: 16px;
+    color: var(--text);
+    line-height: 1.4;
+    font-style: italic;
+  }
+
+  /* History button in header */
+  .history-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-family: inherit;
+  }
+  .history-btn:hover { background: var(--bg-elevated); color: var(--text); }
+
+  /* Rating modal */
+  .rating-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    padding: 16px;
+  }
+  .rating-modal-overlay.active { display: flex; }
+  .rating-modal {
+    background: var(--bg-card);
+    border-radius: 20px;
+    padding: 32px;
+    width: 100%;
+    max-width: 480px;
+    border: 1px solid var(--border);
+    text-align: center;
+  }
+  .rating-modal h2 {
+    font-size: 28px;
+    font-weight: 800;
+    margin-bottom: 6px;
+    letter-spacing: -0.02em;
+  }
+  .rating-modal .recipe-name {
+    color: var(--accent);
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 24px;
+  }
+  .rating-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 24px;
+    padding: 14px;
+    background: var(--bg-elevated);
+    border-radius: 12px;
+  }
+  .rating-stat-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .rating-stat-value {
+    font-size: 22px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+  }
+  .rating-prompt {
+    font-size: 16px;
+    color: var(--text-dim);
+    margin-bottom: 14px;
+  }
+  .rating-stars {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 22px;
+  }
+  .rating-star {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 38px;
+    line-height: 1;
+    padding: 4px 6px;
+    filter: grayscale(1) opacity(0.35);
+    transition: filter 0.15s, transform 0.15s;
+    font-family: inherit;
+  }
+  .rating-star:hover { filter: grayscale(0.5) opacity(0.7); transform: scale(1.05); }
+  .rating-star.active { filter: none; }
+  .rating-notes {
+    width: 100%;
+    background: var(--bg-elevated);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 15px;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 70px;
+    margin-bottom: 16px;
+  }
+  .rating-notes:focus { outline: none; border-color: var(--accent); }
+  .rating-actions {
+    display: flex;
+    gap: 8px;
+  }
+  .rating-actions .modal-btn { flex: 1; }
+
+  /* History modal */
+  .history-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.82);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    padding: 16px;
+  }
+  .history-modal-overlay.active { display: flex; }
+  .history-modal {
+    background: var(--bg-card);
+    border-radius: 20px;
+    padding: 28px;
+    width: 100%;
+    max-width: 600px;
+    max-height: 85vh;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+  }
+  .history-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 18px;
+    gap: 12px;
+  }
+  .history-modal h2 {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+  .history-close {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    font-size: 24px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 4px;
+    font-family: inherit;
+  }
+  .history-close:hover { color: var(--text); }
+  .history-empty {
+    text-align: center;
+    color: var(--text-faint);
+    padding: 30px;
+    font-style: italic;
+  }
+  .history-entry {
+    background: var(--bg-elevated);
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin-bottom: 10px;
+    border-left: 3px solid var(--accent-dim);
+  }
+  .history-entry-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 6px;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .history-date {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .history-rating { color: var(--accent); font-size: 16px; }
+  .history-stats {
+    font-size: 12px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+  }
+  .history-notes {
+    font-size: 14px;
+    color: var(--text);
+    line-height: 1.45;
+    font-style: italic;
+  }
+
+  /* Hide last-bake banner on phone (cleaner remote view) */
+  @media (max-width: 768px) {
+    .last-bake-banner { display: none !important; }
+    .history-btn { padding: 6px 10px; font-size: 11px; }
+  }
+
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- HEADER -->
+  <div class="header">
+    <div class="title-block">
+      <div class="title"><span class="accent" id="recipe-name">—</span></div>
+      <div class="meta-line" id="recipe-meta">—</div>
+    </div>
+    <div class="header-right">
+      <div class="spotify-widget" id="spotify-widget">
+        <img class="spotify-art" id="spotify-art" alt="">
+        <div class="spotify-text">
+          <div class="spotify-track" id="spotify-track">—</div>
+          <div class="spotify-artist" id="spotify-artist">—</div>
+          <div class="spotify-progress">
+            <div class="spotify-progress-fill" id="spotify-progress-fill"></div>
+          </div>
+        </div>
+      </div>
+      <div class="clock-block">
+        <button class="history-btn" onclick="openHistory()">📔 History</button>
+        <span class="clock" id="clock">--:--</span>
+        <span class="sync-indicator" id="sync-indicator" title="Synced"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- TIMER PANEL -->
+  <div class="timer-panel">
+    <div class="panel-header">
+      <div class="panel-title">Timers</div>
+      <button class="add-timer-btn" onclick="openTimerModal()">+ New Timer</button>
+    </div>
+    <div id="timers-container"></div>
+  </div>
+
+  <!-- MAIN STEP AREA -->
+  <div class="main">
+    <!-- BAKE DIARY: last bake banner -->
+    <div class="last-bake-banner" id="last-bake-banner">
+      <div class="last-bake-icon">📔</div>
+      <div class="last-bake-content">
+        <div class="last-bake-meta">
+          <span id="last-bake-date">—</span>
+          <span class="stars" id="last-bake-stars">—</span>
+        </div>
+        <div class="last-bake-notes" id="last-bake-notes">—</div>
+      </div>
+    </div>
+
+    <div class="step-meta">
+      <div class="step-counter" id="step-counter">Step 1 of —</div>
+      <div class="step-time" id="step-time"></div>
+    </div>
+    <div class="step-title" id="step-title">—</div>
+    <div class="step-instruction" id="step-instruction">—</div>
+    <div class="ingredients-used" id="ingredients-used" style="display:none;">
+      <div class="ingredients-label">For this step</div>
+      <div class="ingredients-list" id="ingredients-list"></div>
+    </div>
+  </div>
+
+  <!-- SPOTIFY CONTROLS (phone-only, only visible when track loaded) -->
+  <div class="spotify-controls" id="spotify-controls">
+    <button class="spotify-btn" onclick="spotifyPrev()" aria-label="Previous track">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zM9.5 12L20 4v16z"/></svg>
+    </button>
+    <button class="spotify-btn play" id="spotify-play-btn" onclick="spotifyPlayPause()" aria-label="Play or pause">
+      <svg id="spotify-play-icon" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M8 5v14l11-7z"/></svg>
+      <svg id="spotify-pause-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+    </button>
+    <button class="spotify-btn" onclick="spotifyNext()" aria-label="Next track">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM4 4l10.5 8L4 20z"/></svg>
+    </button>
+  </div>
+
+  <!-- CONTROLS -->
+  <div class="controls">
+    <button class="nav-btn prev" id="prev-btn" onclick="prevStep()">← Back</button>
+    <div class="progress-dots" id="progress-dots"></div>
+    <button class="nav-btn next" id="next-btn" onclick="nextStep()">Next →</button>
+  </div>
+</div>
+
+<!-- TIMER MODAL -->
+<div class="modal-overlay" id="timer-modal">
+  <div class="modal">
+    <h2>New Timer</h2>
+    <label>Name</label>
+    <input type="text" id="timer-name-input" placeholder="e.g. Bake, Cool, Eggs..." autocomplete="off">
+    <label>Duration</label>
+    <div class="duration-presets" id="duration-presets">
+      <button class="preset-btn" data-min="1">1m</button>
+      <button class="preset-btn" data-min="5">5m</button>
+      <button class="preset-btn" data-min="10">10m</button>
+      <button class="preset-btn" data-min="15">15m</button>
+      <button class="preset-btn" data-min="20">20m</button>
+      <button class="preset-btn" data-min="28">28m</button>
+      <button class="preset-btn" data-min="35">35m</button>
+      <button class="preset-btn" data-min="60">1h</button>
+    </div>
+    <input type="number" id="timer-custom-min" placeholder="Custom (minutes)" min="0" max="999" inputmode="decimal">
+    <div class="modal-actions">
+      <button class="modal-btn cancel" onclick="closeTimerModal()">Cancel</button>
+      <button class="modal-btn confirm" onclick="createTimer()">Start Timer</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================
+// RECIPE
+// ============================================
+const RECIPE = {
+  name: "Olive Oil Upside-Down Cakes",
+  metaLine: "Citrus + Pineapple  •  400°F → 350°F  •  Two 8\" pans",
+  steps: [
+    {
+      title: "Set up and stage",
+      instruction: "Pull 3 large eggs from the fridge to come to room temp (need 30–60 min). Pull 200–250g frozen pineapple into a colander over a bowl to thaw. Preheat oven to 400°F with oven thermometer in place, center rack (or upper-middle + lower-middle if both 8\" pans don't fit side by side). Oil both pans, line bottoms with parchment rounds, oil the parchment.",
+      timeNote: "10 min active, then 30+ min wait",
+      ingredients: [
+        { amount: "3", name: "large eggs" },
+        { amount: "200–250g", name: "frozen pineapple" },
+        { amount: "—", name: "olive oil for pans" },
+        { amount: "2", name: "parchment rounds" }
+      ]
+    },
+    {
+      title: "Make the orange flavoring liquid",
+      instruction: "Zest 1 tablespoon (about 1 blood orange's worth) of orange peel into a small bowl. Stir in 43g (3 tbsp) Grand Marnier and 1 tsp orange blossom water or vanilla extract. Set aside — this goes into the common batter for both cakes.",
+      timeNote: "5 min active",
+      ingredients: [
+        { amount: "1 tbsp", name: "orange zest" },
+        { amount: "43g", name: "Grand Marnier" },
+        { amount: "1 tsp", name: "orange blossom water or vanilla" }
+      ]
+    },
+    {
+      title: "Slice fruit and prep slurry juices",
+      instruction: "Mandoline-slice 2 blood oranges and 2 cara caras paper-thin (1.5–2mm), reserving the ends and removing seeds. Squeeze the reserved ends to get 1 tbsp combined citrus juice. Press the thawed pineapple firmly between paper towels to remove as much liquid as possible — frozen pineapple holds extra water that will make the cake soggy if not drained aggressively. Reserve 1 tbsp of the drained pineapple juice.",
+      timeNote: "15 min active",
+      ingredients: [
+        { amount: "2", name: "blood oranges" },
+        { amount: "2", name: "cara caras" },
+        { amount: "—", name: "thawed pineapple, drained hard" },
+        { amount: "1 tbsp", name: "reserved citrus juice" },
+        { amount: "1 tbsp", name: "reserved pineapple juice" }
+      ]
+    },
+    {
+      title: "Build both upside-down layers",
+      instruction: "FOR THE CITRUS PAN: Whisk 33g sugar into the 1 tbsp citrus juice until smooth, pour into Pan 1, tilt to spread. Arrange blood orange and cara cara slices in concentric overlapping circles, alternating colors. Press gently to seat. FOR THE PINEAPPLE PAN: Whisk 33g sugar into the 1 tbsp pineapple juice until smooth, pour into Pan 2, tilt to spread. Arrange pineapple in a tight overlapping pattern, packing densely with no large gaps.",
+      timeNote: "15 min active",
+      ingredients: [
+        { amount: "66g", name: "sugar (33g per pan)" },
+        { amount: "1 tbsp", name: "citrus juice" },
+        { amount: "1 tbsp", name: "pineapple juice" },
+        { amount: "—", name: "sliced citrus" },
+        { amount: "—", name: "drained pineapple" }
+      ]
+    },
+    {
+      title: "Whisk the dry ingredients",
+      instruction: "In a medium bowl, whisk together 238g cake flour, 8g (2 tsp) baking powder, and 2g (⅓ tsp) Morton's kosher salt until fully combined and lump-free.",
+      timeNote: "3 min active",
+      ingredients: [
+        { amount: "238g", name: "cake flour" },
+        { amount: "8g", name: "baking powder" },
+        { amount: "2g", name: "Morton's kosher salt" }
+      ]
+    },
+    {
+      title: "Beat eggs and sugar to ribbon",
+      instruction: "In the KitchenAid with whisk attachment, combine the 3 room-temp eggs and 197g sugar. Start on low to break up the eggs, then increase to high. Beat 5 full minutes until very pale, thick, and the mixture falls off the whisk in a slowly dissolving ribbon. Do not shortcut this — the ribbon is the leavening.",
+      timeNote: "5 min — start timer",
+      ingredients: [
+        { amount: "3", name: "large eggs (room temp)" },
+        { amount: "197g", name: "sugar" }
+      ]
+    },
+    {
+      title: "Stream in the olive oil",
+      instruction: "With the mixer still on high, slowly stream in 280g extra-virgin olive oil over 60–90 seconds. The mixture will thicken slightly and reduce in volume. Don't rush — too fast breaks the emulsion.",
+      timeNote: "90 sec active",
+      ingredients: [
+        { amount: "280g", name: "extra-virgin olive oil" }
+      ]
+    },
+    {
+      title: "Alternate flour and liquid",
+      instruction: "Reduce mixer speed to low. Add ⅓ of the flour mixture and mix briefly. Add half the Grand Marnier mixture and mix briefly. Add another ⅓ of the flour mixture and mix briefly. Add the rest of the Grand Marnier mixture and mix briefly. Add the last ⅓ of the flour mixture and mix until just combined. Stop the mixer and fold the batter several times by hand with a spatula, scraping the bottom and sides of the bowl.",
+      timeNote: "5 min active",
+      ingredients: [
+        { amount: "—", name: "flour mixture (Step 5)" },
+        { amount: "—", name: "Grand Marnier mixture (Step 2)" }
+      ]
+    },
+    {
+      title: "Divide and bake",
+      instruction: "Total batter is ~900g pourable. Tare your scale and pour 450g of batter into each pan from low height over the fruit layers — do not disturb the fruit. Smooth the tops gently. Do not tap the pans on the counter. Transfer to the preheated 400°F oven and immediately reduce temperature to 350°F. Both cakes bake on the same schedule. Start checking at 25 min: done when tops are golden brown, center is firm to touch, and a skewer comes out clean.",
+      timeNote: "28–35 min bake — start timer, first check at 25 min",
+      ingredients: [
+        { amount: "~900g", name: "batter (450g per pan)" }
+      ]
+    },
+    {
+      title: "Cool, invert, unmold",
+      instruction: "Transfer pans to wire racks and cool 15 minutes — set a timer. At 15 min, run a thin knife around the edge of each pan. Place a wire rack on top of each pan and flip in one confident motion (use oven mitts, the pans are hot). Lift the pan straight up, then carefully peel the parchment away from the fruit layer. If a fruit slice sticks to the parchment, gently lift it back onto the cake with a small offset spatula. The pineapple cake will look more rustic than the citrus cake — expected. Cool completely on the racks (45–60 min).",
+      timeNote: "15 min in pan + 45–60 min cooling",
+      ingredients: []
+    },
+    {
+      title: "Wrap and rest",
+      instruction: "Once both cakes are fully cool to the touch, wrap each tightly in plastic wrap. Rest at room temperature overnight — olive oil cakes peak in flavor and texture on day 2–3. Serve sliced, optionally with lightly sweetened plain whole-milk yogurt alongside.",
+      timeNote: "Overnight wait",
+      ingredients: [
+        { amount: "—", name: "plastic wrap" },
+        { amount: "optional", name: "plain whole-milk yogurt for serving" }
+      ]
+    }
+  ]
+};
+
+// ============================================
+// STATE — server is canonical
+// ============================================
+let currentStep = 0;
+let timers = [];
+let nextTimerId = 1;
+let lastVersion = -1;
+let isOnline = true;
+let selectedPresetMin = null;
+
+// ============================================
+// SERVER SYNC
+// ============================================
+async function fetchState() {
+  try {
+    const r = await fetch("/state", { cache: "no-store" });
+    if (!r.ok) throw new Error("server error");
+    const s = await r.json();
+    setOnline(true);
+    if (s.version !== lastVersion) {
+      lastVersion = s.version;
+      currentStep = s.currentStep || 0;
+      timers = s.timers || [];
+      nextTimerId = s.nextTimerId || 1;
+      renderStep();
+      renderTimers();
+    }
+  } catch (e) {
+    setOnline(false);
+  }
+}
+
+async function pushState() {
+  try {
+    const r = await fetch("/state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        currentStep, timers, nextTimerId,
+        recipeName: RECIPE.name,
+        totalSteps: RECIPE.steps.length,
+      })
+    });
+    if (!r.ok) throw new Error("push failed");
+    const s = await r.json();
+    lastVersion = s.version;
+    setOnline(true);
+  } catch (e) {
+    setOnline(false);
+  }
+}
+
+function setOnline(yes) {
+  if (yes === isOnline) return;
+  isOnline = yes;
+  const ind = document.getElementById("sync-indicator");
+  if (yes) {
+    ind.classList.remove("offline");
+    ind.title = "Synced";
+  } else {
+    ind.classList.add("offline");
+    ind.title = "Offline — server unreachable";
+  }
+}
+
+// ============================================
+// SPOTIFY
+// ============================================
+let spotifyState = null;
+let spotifyLastFetchMs = 0;
+
+async function fetchNowPlaying() {
+  try {
+    const r = await fetch("/now-playing", { cache: "no-store" });
+    if (!r.ok) return;
+    spotifyState = await r.json();
+    spotifyLastFetchMs = Date.now();
+    renderSpotify();
+  } catch (e) {
+    // silent — Spotify is optional
+  }
+}
+
+function renderSpotify() {
+  const widget = document.getElementById("spotify-widget");
+  const controls = document.getElementById("spotify-controls");
+
+  // Show whenever a track is loaded — even if paused — so the user can resume.
+  const hasTrack = spotifyState && spotifyState.track;
+
+  if (!hasTrack) {
+    widget.classList.remove("active");
+    controls.classList.remove("active");
+    return;
+  }
+
+  widget.classList.add("active");
+  controls.classList.add("active");
+
+  const art = document.getElementById("spotify-art");
+  if (spotifyState.art_url && art.src !== spotifyState.art_url) {
+    art.src = spotifyState.art_url;
+  }
+  document.getElementById("spotify-track").textContent = spotifyState.track || "—";
+  document.getElementById("spotify-artist").textContent = spotifyState.artist || "—";
+
+  // Toggle play/pause icon based on current state
+  const playIcon = document.getElementById("spotify-play-icon");
+  const pauseIcon = document.getElementById("spotify-pause-icon");
+  if (spotifyState.playing) {
+    playIcon.style.display = "none";
+    pauseIcon.style.display = "block";
+  } else {
+    playIcon.style.display = "block";
+    pauseIcon.style.display = "none";
+  }
+
+  // Smooth progress: estimate current ms based on last server fetch + elapsed wall time
+  if (spotifyState.duration_ms > 0) {
+    let currentMs = spotifyState.progress_ms || 0;
+    if (spotifyState.playing) {
+      const elapsedSinceFetch = Date.now() - spotifyLastFetchMs;
+      currentMs = Math.min(spotifyState.duration_ms, currentMs + elapsedSinceFetch);
+    }
+    const pct = (currentMs / spotifyState.duration_ms) * 100;
+    document.getElementById("spotify-progress-fill").style.width = pct + "%";
+  }
+}
+
+// Spotify playback controls — call server, which proxies to Spotify
+async function spotifyControl(action) {
+  try {
+    await fetch("/spotify-" + action, { method: "POST" });
+  } catch (e) {}
+  // Refresh now-playing soon to reflect the change
+  setTimeout(fetchNowPlaying, 350);
+  setTimeout(fetchNowPlaying, 1200);
+}
+function spotifyPrev() { spotifyControl("previous"); }
+function spotifyNext() { spotifyControl("next"); }
+function spotifyPlayPause() {
+  const action = (spotifyState && spotifyState.playing) ? "pause" : "play";
+  // Optimistic UI: flip the icon immediately so it feels instant
+  if (spotifyState) {
+    spotifyState.playing = !spotifyState.playing;
+    renderSpotify();
+  }
+  spotifyControl(action);
+}
+
+// ============================================
+// STEP NAVIGATION
+// ============================================
+function renderStep() {
+  const step = RECIPE.steps[currentStep];
+  document.getElementById("recipe-name").textContent = RECIPE.name;
+  document.getElementById("recipe-meta").textContent = RECIPE.metaLine;
+  document.getElementById("step-counter").textContent =
+    `Step ${currentStep + 1} of ${RECIPE.steps.length}`;
+  document.getElementById("step-title").textContent = step.title;
+  document.getElementById("step-instruction").textContent = step.instruction;
+  document.getElementById("step-time").textContent = step.timeNote || "";
+
+  const ingDiv = document.getElementById("ingredients-used");
+  const ingList = document.getElementById("ingredients-list");
+  if (step.ingredients && step.ingredients.length > 0) {
+    ingDiv.style.display = "block";
+    ingList.innerHTML = step.ingredients.map(ing =>
+      `<div class="ingredient-tag"><span class="amount">${escapeHtml(ing.amount)}</span>${escapeHtml(ing.name)}</div>`
+    ).join("");
+  } else {
+    ingDiv.style.display = "none";
+  }
+
+  document.getElementById("prev-btn").disabled = currentStep === 0;
+  const nextBtn = document.getElementById("next-btn");
+  if (currentStep === RECIPE.steps.length - 1) {
+    nextBtn.textContent = "Done ✓";
+  } else {
+    nextBtn.textContent = "Next →";
+  }
+
+  renderProgressDots();
+  document.getElementById("step-instruction").scrollTop = 0;
+}
+
+function renderProgressDots() {
+  const container = document.getElementById("progress-dots");
+  container.innerHTML = RECIPE.steps.map((_, i) => {
+    let cls = "dot";
+    if (i < currentStep) cls += " complete";
+    else if (i === currentStep) cls += " current";
+    return `<div class="${cls}"></div>`;
+  }).join("");
+}
+
+function nextStep() {
+  if (currentStep < RECIPE.steps.length - 1) {
+    currentStep++;
+    renderStep();
+    pushState();
+  } else {
+    // Last step + Done = bake complete → open rating modal
+    openRatingModal();
+  }
+}
+
+function prevStep() {
+  if (currentStep > 0) {
+    currentStep--;
+    renderStep();
+    pushState();
+  }
+}
+
+// ============================================
+// TIMERS
+// ============================================
+function openTimerModal() {
+  document.getElementById("timer-modal").classList.add("active");
+  document.getElementById("timer-name-input").value = "";
+  document.getElementById("timer-custom-min").value = "";
+  selectedPresetMin = null;
+  document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("selected"));
+  setTimeout(() => document.getElementById("timer-name-input").focus(), 50);
+}
+
+function closeTimerModal() {
+  document.getElementById("timer-modal").classList.remove("active");
+}
+
+document.querySelectorAll(".preset-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("selected"));
+    btn.classList.add("selected");
+    selectedPresetMin = parseInt(btn.dataset.min);
+    document.getElementById("timer-custom-min").value = "";
+  });
+});
+
+document.getElementById("timer-custom-min").addEventListener("input", () => {
+  document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("selected"));
+  selectedPresetMin = null;
+});
+
+function createTimer() {
+  const name = document.getElementById("timer-name-input").value.trim() || "Timer";
+  const customMin = parseFloat(document.getElementById("timer-custom-min").value);
+  const minutes = customMin > 0 ? customMin : selectedPresetMin;
+  if (!minutes || minutes <= 0) {
+    document.getElementById("timer-custom-min").focus();
+    return;
+  }
+  const durationMs = minutes * 60 * 1000;
+  timers.push({
+    id: nextTimerId++,
+    name,
+    duration: durationMs,
+    endTime: Date.now() + durationMs,
+    paused: false,
+    pausedRemaining: null
+  });
+  closeTimerModal();
+  renderTimers();
+  pushState();
+}
+
+function pauseTimer(id) {
+  const t = timers.find(t => t.id === id);
+  if (!t) return;
+  if (t.paused) {
+    t.endTime = Date.now() + t.pausedRemaining;
+    t.paused = false;
+    t.pausedRemaining = null;
+  } else {
+    t.pausedRemaining = t.endTime - Date.now();
+    t.paused = true;
+  }
+  renderTimers();
+  pushState();
+}
+
+function deleteTimer(id) {
+  timers = timers.filter(t => t.id !== id);
+  beeped.delete(id);
+  renderTimers();
+  pushState();
+}
+
+function resetTimer(id) {
+  const t = timers.find(t => t.id === id);
+  if (!t) return;
+  t.endTime = Date.now() + t.duration;
+  t.paused = false;
+  t.pausedRemaining = null;
+  beeped.delete(id);
+  renderTimers();
+  pushState();
+}
+
+function formatTime(ms) {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function renderTimers() {
+  const container = document.getElementById("timers-container");
+  if (!timers || timers.length === 0) {
+    container.innerHTML = '<div class="empty-timers">No timers running.<br>Tap + New Timer to start one.</div>';
+    return;
+  }
+  const now = Date.now();
+  container.innerHTML = timers.map(t => {
+    const remaining = t.paused ? t.pausedRemaining : (t.endTime - now);
+    let cls = "timer";
+    if (remaining <= 0) cls += " done";
+    else if (remaining < 60000) cls += " warning";
+    else if (!t.paused) cls += " running";
+    const display = remaining <= 0 ? "DONE" : formatTime(remaining);
+    return `
+      <div class="${cls}">
+        <div class="timer-row">
+          <div class="timer-name">${escapeHtml(t.name)}</div>
+          <div class="timer-display">${display}</div>
+        </div>
+        <div class="timer-controls">
+          <button class="timer-btn" onclick="pauseTimer(${t.id})">${t.paused ? "Resume" : "Pause"}</button>
+          <button class="timer-btn" onclick="resetTimer(${t.id})">Reset</button>
+          <button class="timer-btn danger" onclick="deleteTimer(${t.id})">×</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+// ============================================
+// AUDIO ALERT
+// ============================================
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) {
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) {}
+  }
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+}
+
+function beep() {
+  try {
+    ensureAudio();
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.5);
+  } catch (e) {}
+}
+
+document.addEventListener("touchstart", ensureAudio, { once: true });
+document.addEventListener("click", ensureAudio, { once: true });
+
+const beeped = new Set();
+function checkTimers() {
+  const now = Date.now();
+  timers.forEach(t => {
+    if (!t.paused && t.endTime <= now && !beeped.has(t.id)) {
+      beep();
+      setTimeout(beep, 600);
+      setTimeout(beep, 1200);
+      beeped.add(t.id);
+    }
+  });
+}
+
+// ============================================
+// CLOCK
+// ============================================
+function updateClock() {
+  const d = new Date();
+  const h = d.getHours();
+  const m = String(d.getMinutes()).padStart(2, "0");
+  const ampm = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  document.getElementById("clock").textContent = `${h12}:${m} ${ampm}`;
+}
+
+// ============================================
+// KEYBOARD SHORTCUTS
+// ============================================
+document.addEventListener("keydown", e => {
+  if (document.getElementById("timer-modal").classList.contains("active")) {
+    if (e.key === "Enter") createTimer();
+    if (e.key === "Escape") closeTimerModal();
+    return;
+  }
+  if (e.key === "ArrowRight" || e.key === " ") { e.preventDefault(); nextStep(); }
+  if (e.key === "ArrowLeft") { e.preventDefault(); prevStep(); }
+  if (e.key === "t" || e.key === "T") openTimerModal();
+});
+
+// ============================================
+// WAKE LOCK (keep screen awake on iPhone during cooking)
+// ============================================
+let wakeLock = null;
+async function requestWakeLock() {
+  try {
+    if ("wakeLock" in navigator) {
+      wakeLock = await navigator.wakeLock.request("screen");
+    }
+  } catch (e) {}
+}
+document.addEventListener("touchstart", requestWakeLock, { once: true });
+document.addEventListener("click", requestWakeLock, { once: true });
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") requestWakeLock();
+});
+
+// ============================================
+// BAKE DIARY
+// ============================================
+let pastBakes = [];
+let selectedRating = null;
+
+async function fetchHistory() {
+  try {
+    const r = await fetch(`/history?recipe=${encodeURIComponent(RECIPE.name)}&limit=20`);
+    if (!r.ok) return;
+    const data = await r.json();
+    pastBakes = data.history || [];
+    renderLastBakeBanner();
+  } catch (e) {}
+}
+
+function renderLastBakeBanner() {
+  const banner = document.getElementById("last-bake-banner");
+  if (!banner) return;
+  if (!pastBakes.length) {
+    banner.classList.remove("active");
+    return;
+  }
+  const last = pastBakes[0]; // most recent
+  const dateStr = formatBakeDate(last.startedAt);
+  document.getElementById("last-bake-date").textContent = `Last bake — ${dateStr}`;
+  document.getElementById("last-bake-stars").innerHTML = renderStars(last.rating);
+  const notes = (last.notes || "").trim();
+  document.getElementById("last-bake-notes").textContent = notes
+    ? `"${notes}"`
+    : `(no notes — rated ${last.rating || "?"}/5, ${last.durationMinutes || "?"} min)`;
+  banner.classList.add("active");
+}
+
+function renderStars(rating) {
+  if (!rating) return "<span style='color: var(--text-faint)'>(unrated)</span>";
+  const filled = "★".repeat(rating);
+  const empty = "☆".repeat(5 - rating);
+  return filled + empty;
+}
+
+function formatBakeDate(unixSec) {
+  if (!unixSec) return "—";
+  const d = new Date(unixSec * 1000);
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+// --- Rating modal ---
+function openRatingModal() {
+  selectedRating = null;
+  document.querySelectorAll(".rating-star").forEach(b => b.classList.remove("active"));
+  document.getElementById("rating-notes").value = "";
+
+  // Pull stats from the active session in state
+  fetch("/state").then(r => r.json()).then(s => {
+    const session = s.currentSession;
+    document.getElementById("rating-recipe-name").textContent = RECIPE.name;
+    if (session) {
+      const elapsedSec = Math.floor(Date.now() / 1000) - (session.startedAt || 0);
+      const min = Math.max(1, Math.round(elapsedSec / 60));
+      const h = Math.floor(min / 60);
+      const m = min % 60;
+      document.getElementById("rating-duration").textContent = h > 0 ? `${h}h ${m}m` : `${m} min`;
+      document.getElementById("rating-timer-count").textContent = (session.timersRun || []).length;
+    } else {
+      document.getElementById("rating-duration").textContent = "—";
+      document.getElementById("rating-timer-count").textContent = "—";
+    }
+  }).catch(() => {});
+
+  document.getElementById("rating-modal-overlay").classList.add("active");
+}
+
+function closeRatingModal() {
+  document.getElementById("rating-modal-overlay").classList.remove("active");
+}
+
+document.querySelectorAll(".rating-star").forEach(btn => {
+  btn.addEventListener("click", () => {
+    selectedRating = parseInt(btn.dataset.rating);
+    document.querySelectorAll(".rating-star").forEach((b, i) => {
+      b.classList.toggle("active", i < selectedRating);
+    });
+  });
+});
+
+async function submitRating() {
+  const notes = document.getElementById("rating-notes").value.trim();
+  if (!selectedRating && !notes) {
+    // Nothing to save — treat as skip
+    return skipRating();
+  }
+  try {
+    await fetch("/session/rate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rating: selectedRating, notes }),
+    });
+  } catch (e) {}
+  closeRatingModal();
+  await fetchHistory(); // refresh banner with the new bake on top
+}
+
+async function skipRating() {
+  try {
+    await fetch("/session/discard", { method: "POST" });
+  } catch (e) {}
+  closeRatingModal();
+}
+
+// --- History modal ---
+function openHistory() {
+  document.getElementById("history-recipe-name").textContent = RECIPE.name;
+  renderHistory();
+  document.getElementById("history-modal-overlay").classList.add("active");
+  // Refresh in case other devices added bakes
+  fetchHistory().then(renderHistory);
+}
+
+function closeHistory() {
+  document.getElementById("history-modal-overlay").classList.remove("active");
+}
+
+function renderHistory() {
+  const container = document.getElementById("history-list");
+  if (!pastBakes.length) {
+    container.innerHTML = '<div class="history-empty">No past bakes yet.<br>Finish this one and rate it — it\'ll show up here next time.</div>';
+    return;
+  }
+  container.innerHTML = pastBakes.map(b => {
+    const date = formatBakeDate(b.startedAt);
+    const stars = renderStars(b.rating);
+    const dur = b.durationMinutes ? (
+      b.durationMinutes >= 60
+        ? `${Math.floor(b.durationMinutes / 60)}h ${b.durationMinutes % 60}m`
+        : `${b.durationMinutes} min`
+    ) : "—";
+    const timerCount = (b.timersRun || []).length;
+    const notes = (b.notes || "").trim();
+    return `
+      <div class="history-entry">
+        <div class="history-entry-top">
+          <div class="history-date">${escapeHtml(date)}</div>
+          <div class="history-rating">${stars}</div>
+        </div>
+        <div class="history-stats">${dur} • ${timerCount} timer${timerCount === 1 ? "" : "s"}</div>
+        ${notes ? `<div class="history-notes">"${escapeHtml(notes)}"</div>` : ""}
+      </div>
+    `;
+  }).join("");
+}
+
+// Click outside modal to close
+document.getElementById("history-modal-overlay").addEventListener("click", e => {
+  if (e.target.id === "history-modal-overlay") closeHistory();
+});
+document.getElementById("rating-modal-overlay").addEventListener("click", e => {
+  // Don't allow click-out on rating modal — user must explicitly Save or Skip
+});
+
+// ============================================
+// INIT
+// ============================================
+renderStep();
+renderTimers();
+updateClock();
+fetchState();
+fetchNowPlaying();
+fetchHistory();
+
+// Recipe state — fast polling
+setInterval(fetchState, 600);
+
+// Spotify — slower polling (server-side cache makes this cheap regardless)
+setInterval(fetchNowPlaying, 5000);
+
+// Local UI tick — countdowns, clock, smooth Spotify progress
+setInterval(() => {
+  renderTimers();
+  checkTimers();
+  updateClock();
+  renderSpotify();
+}, 1000);
+</script>
+<!-- BAKE DIARY: rating modal (shown when user hits Done on last step) -->
+<div class="rating-modal-overlay" id="rating-modal-overlay">
+  <div class="rating-modal">
+    <h2>🎉 Bake Complete</h2>
+    <div class="recipe-name" id="rating-recipe-name">—</div>
+
+    <div class="rating-stats">
+      <div>
+        <div class="rating-stat-label">Total time</div>
+        <div class="rating-stat-value" id="rating-duration">—</div>
+      </div>
+      <div>
+        <div class="rating-stat-label">Timers used</div>
+        <div class="rating-stat-value" id="rating-timer-count">—</div>
+      </div>
+    </div>
+
+    <div class="rating-prompt">How did it turn out?</div>
+    <div class="rating-stars" id="rating-stars-container">
+      <button class="rating-star" data-rating="1">⭐</button>
+      <button class="rating-star" data-rating="2">⭐</button>
+      <button class="rating-star" data-rating="3">⭐</button>
+      <button class="rating-star" data-rating="4">⭐</button>
+      <button class="rating-star" data-rating="5">⭐</button>
+    </div>
+
+    <textarea class="rating-notes" id="rating-notes" placeholder="Notes for next time? (optional) — e.g. &quot;do 32 min next time, eggs needed longer ribbon&quot;"></textarea>
+
+    <div class="rating-actions">
+      <button class="modal-btn cancel" onclick="skipRating()">Skip</button>
+      <button class="modal-btn confirm" onclick="submitRating()">Save & Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- BAKE DIARY: history modal -->
+<div class="history-modal-overlay" id="history-modal-overlay">
+  <div class="history-modal">
+    <div class="history-modal-header">
+      <h2>📔 Past bakes — <span id="history-recipe-name">—</span></h2>
+      <button class="history-close" onclick="closeHistory()" aria-label="Close">✕</button>
+    </div>
+    <div id="history-list">
+      <div class="history-empty">No past bakes yet.</div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

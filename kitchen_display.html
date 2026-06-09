@@ -1,0 +1,1782 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Kitchen">
+<title>Kitchen Display</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  :root {
+    --bg: #0e0e10;
+    --bg-card: #1a1a1e;
+    --bg-elevated: #25252b;
+    --border: #2e2e35;
+    --text: #f0efea;
+    --text-dim: #8a8a92;
+    --text-faint: #4a4a52;
+    --accent: #ff8c42;
+    --accent-dim: #b86530;
+    --warn: #ffb84d;
+    --done: #4ade80;
+    --danger: #f87171;
+    --spotify: #1ed760;
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
+    font-feature-settings: "ss01", "cv11";
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* ============================================
+     LAYOUT — default is landscape; portrait kicks in via media query
+     ============================================ */
+  .app {
+    display: grid;
+    grid-template-columns: 1fr clamp(280px, 26vw, 460px);
+    grid-template-rows: auto 1fr auto;
+    height: 100vh;            /* fallback for older browsers */
+    height: 100dvh;           /* dynamic viewport — respects iOS chrome/home indicator */
+    gap: 14px;
+    padding: 14px;
+    padding-bottom: max(14px, env(safe-area-inset-bottom));
+  }
+
+  /* HEADER */
+  .header {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 0 4px;
+  }
+  .title-block { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .title {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .title .accent { color: var(--accent); }
+  .meta-line {
+    font-size: 13px;
+    color: var(--text-dim);
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+
+  /* SPOTIFY WIDGET */
+  .spotify-widget {
+    display: none;
+    align-items: center;
+    gap: 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 16px 10px 10px;
+    min-width: 260px;
+    max-width: 360px;
+  }
+  .spotify-widget.active { display: flex; }
+  .spotify-art {
+    width: 56px;
+    height: 56px;
+    border-radius: 6px;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: var(--bg-elevated);
+  }
+  .spotify-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .spotify-track {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+  }
+  .spotify-artist {
+    font-size: 12px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+  }
+  .spotify-progress {
+    margin-top: 5px;
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .spotify-progress-fill {
+    height: 100%;
+    background: var(--spotify);
+    width: 0%;
+    border-radius: 2px;
+    transition: width 1s linear;
+  }
+
+  .clock-block {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .clock {
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
+    font-size: 18px;
+    letter-spacing: 0.02em;
+  }
+  .sync-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--done);
+    transition: background 0.3s;
+  }
+  .sync-indicator.offline { background: var(--danger); }
+
+  /* MAIN STEP AREA */
+  .main {
+    background: var(--bg-card);
+    border-radius: 16px;
+    padding: 36px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .step-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 10px;
+    gap: 12px;
+  }
+  .step-counter {
+    font-size: 13px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: 700;
+  }
+  .step-time {
+    font-size: 13px;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-width: 0;
+  }
+  .step-time > span { display: inline-block; }
+
+  /* Suggested-timer button (next to time note) */
+  .suggested-timer-btn {
+    display: inline-block;
+    padding: 6px 14px;
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 0.85em;
+    font-weight: 800;
+    cursor: pointer;
+    text-transform: none;
+    letter-spacing: 0;
+    vertical-align: middle;
+    transition: transform 0.1s, background 0.15s;
+  }
+  .suggested-timer-btn:hover,
+  .suggested-timer-btn:active { background: #ffa05c; }
+  .suggested-timer-btn:active { transform: scale(0.96); }
+  .step-title {
+    font-size: 38px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin-bottom: 22px;
+    line-height: 1.05;
+    color: var(--text);
+  }
+  .step-instruction {
+    font-size: 22px;
+    line-height: 1.5;
+    color: var(--text);
+    flex-grow: 1;
+    overflow-y: auto;
+    padding-right: 8px;
+  }
+  .step-instruction::-webkit-scrollbar { width: 8px; }
+  .step-instruction::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  /* Numbered step list inside the instruction area */
+  .step-list {
+    list-style: none;
+    counter-reset: step-counter;
+    padding: 0;
+    margin: 0;
+  }
+  .step-list li {
+    counter-increment: step-counter;
+    position: relative;
+    padding-left: 2.4em;
+    margin-bottom: 0.85em;
+  }
+  .step-list li:last-child { margin-bottom: 0; }
+  .step-list li::before {
+    content: counter(step-counter);
+    position: absolute;
+    left: 0;
+    top: 0.05em;
+    width: 1.7em;
+    height: 1.7em;
+    line-height: 1.7em;
+    text-align: center;
+    background: var(--bg-elevated);
+    color: var(--accent);
+    border-radius: 50%;
+    font-weight: 800;
+    font-size: 0.7em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ingredients-used {
+    margin-bottom: 22px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ingredients-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 10px;
+    font-weight: 700;
+  }
+  .ingredients-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .ingredient-tag {
+    background: var(--bg-elevated);
+    padding: 7px 13px;
+    border-radius: 8px;
+    font-size: 15px;
+  }
+  .ingredient-tag .amount {
+    color: var(--accent);
+    font-weight: 700;
+    margin-right: 6px;
+  }
+
+  /* TIMER PANEL */
+  .timer-panel {
+    background: var(--bg-card);
+    border-radius: 16px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+  }
+  .panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+  }
+  .panel-title {
+    font-size: 12px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: 700;
+  }
+  .add-timer-btn {
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-family: inherit;
+  }
+  .add-timer-btn:active { background: #ffa05c; }
+
+  #timers-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .timer {
+    background: var(--bg-elevated);
+    border-radius: 12px;
+    padding: 12px 16px;
+    border-left: 4px solid var(--accent-dim);
+    transition: background 0.3s;
+  }
+  .timer.running { border-left-color: var(--accent); }
+  .timer.done {
+    border-left-color: var(--done);
+    animation: pulse 1.5s infinite;
+  }
+  .timer.warning { border-left-color: var(--warn); }
+
+  @keyframes pulse {
+    0%, 100% { background: var(--bg-elevated); }
+    50% { background: rgba(74, 222, 128, 0.18); }
+  }
+
+  @keyframes flashOut {
+    0% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  .timer-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }
+  .timer-name {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .timer-display {
+    font-size: 22px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+    letter-spacing: -0.02em;
+  }
+  .timer.done .timer-display { color: var(--done); }
+  .timer.warning .timer-display { color: var(--warn); }
+
+  .timer-controls {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .timer-btn {
+    flex: 1;
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-family: inherit;
+  }
+  .timer-btn:active { background: var(--border); color: var(--text); }
+  .timer-btn.danger:active { background: var(--danger); color: var(--bg); border-color: var(--danger); }
+
+  .empty-timers {
+    color: var(--text-faint);
+    font-size: 14px;
+    text-align: center;
+    padding: 20px;
+    font-style: italic;
+  }
+
+  /* SPOTIFY TRANSPORT CONTROLS — phone-only, lives inside widget card */
+  .spotify-controls {
+    display: none;
+    gap: 10px;
+    justify-content: flex-start;
+    align-items: center;
+    margin-top: 8px;
+  }
+  /* `.active` only shows on phone (see phone media query). On 27"/laptop it stays hidden. */
+  .spotify-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: transform 0.1s;
+    font-family: inherit;
+  }
+  .spotify-btn:active { transform: scale(0.92); }
+  .spotify-btn svg { width: 16px; height: 16px; }
+  .spotify-btn.play {
+    width: 42px;
+    height: 36px;
+    background: var(--spotify);
+    border-color: var(--spotify);
+    color: var(--bg);
+    border-radius: 8px;
+  }
+  .spotify-btn.play svg { width: 18px; height: 18px; }
+
+  /* CONTROLS BAR */
+  .controls {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 12px;
+    padding: 0 4px;
+    align-items: center;
+  }
+  .nav-btn {
+    background: var(--bg-card);
+    color: var(--text);
+    border: none;
+    border-radius: 12px;
+    padding: 18px 32px;
+    font-size: 18px;
+    font-weight: 800;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    min-height: 60px;
+    font-family: inherit;
+  }
+  .nav-btn:active:not(:disabled) { background: var(--bg-elevated); }
+  .nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .nav-btn.next {
+    background: var(--accent);
+    color: var(--bg);
+    flex: 1;
+  }
+  .nav-btn.next:active { background: #ffa05c; }
+  .nav-btn.prev { min-width: 120px; }
+
+  .progress-dots {
+    display: flex;
+    gap: 6px;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    padding: 0 16px;
+    flex-wrap: wrap;
+  }
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--border);
+    transition: all 0.2s;
+  }
+  .dot.complete { background: var(--accent-dim); }
+  .dot.current { background: var(--accent); transform: scale(1.5); }
+
+  /* TIMER MODAL */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.78);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+  .modal-overlay.active { display: flex; }
+  .modal {
+    background: var(--bg-card);
+    border-radius: 16px;
+    padding: 28px;
+    width: 90%;
+    max-width: 480px;
+    border: 1px solid var(--border);
+  }
+  .modal h2 {
+    font-size: 22px;
+    margin-bottom: 20px;
+    font-weight: 800;
+  }
+  .modal label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 6px;
+    font-weight: 700;
+  }
+  .modal input {
+    width: 100%;
+    background: var(--bg-elevated);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    font-size: 17px;
+    margin-bottom: 16px;
+    font-family: inherit;
+  }
+  .modal input:focus { outline: none; border-color: var(--accent); }
+  .duration-presets {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .preset-btn {
+    background: var(--bg-elevated);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 6px;
+    font-size: 14px;
+    cursor: pointer;
+    font-weight: 700;
+    font-family: inherit;
+  }
+  .preset-btn:active { background: var(--border); }
+  .preset-btn.selected {
+    background: var(--accent);
+    color: var(--bg);
+    border-color: var(--accent);
+  }
+  .modal-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .modal-btn {
+    flex: 1;
+    padding: 16px;
+    border-radius: 8px;
+    border: none;
+    font-size: 15px;
+    font-weight: 800;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-family: inherit;
+  }
+  .modal-btn.cancel { background: var(--bg-elevated); color: var(--text-dim); }
+  .modal-btn.confirm { background: var(--accent); color: var(--bg); }
+
+  /* ============================================
+     LANDSCAPE COLUMN PLACEMENT — steps in the wide left box, timers in
+     the narrow right box. The HTML puts .timer-panel before .main, so
+     grid auto-flow would otherwise drop the timers into the wide 1fr
+     column and squeeze the steps into the narrow one. Pin them so the
+     viewer reads steps from across the kitchen and timers stay tucked
+     on the right. Portrait/phone (single-column) layouts are unaffected.
+     ============================================ */
+  @media (orientation: landscape) {
+    .main        { grid-column: 1; grid-row: 2; }
+    .timer-panel { grid-column: 2; grid-row: 2; }
+  }
+
+  /* ============================================
+     PORTRAIT — primary layout for 27" monitor + phone
+     ============================================ */
+  @media (orientation: portrait) {
+    .app {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto auto 1fr auto;
+    }
+    .timer-panel {
+      grid-row: 2;
+      max-height: 32vh;
+    }
+    #timers-container {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+    }
+    .main {
+      grid-row: 3;
+    }
+  }
+
+  /* ============================================
+     27" MONITOR IN PORTRAIT — bump up text for cooking-distance reading
+     (orientation: portrait + non-phone width)
+     ============================================ */
+  @media (orientation: portrait) and (min-width: 900px) {
+    .app { padding: 22px; gap: 18px; }
+    .title { font-size: 32px; }
+    .meta-line { font-size: 17px; }
+    .clock { font-size: 24px; }
+
+    .spotify-widget {
+      min-width: 340px;
+      max-width: 460px;
+      padding: 14px 20px 14px 14px;
+      gap: 16px;
+    }
+    .spotify-art { width: 80px; height: 80px; border-radius: 8px; }
+    .spotify-track { font-size: 18px; max-width: 320px; }
+    .spotify-artist { font-size: 14px; max-width: 320px; }
+    .spotify-progress { height: 4px; margin-top: 8px; }
+
+    .main { padding: 48px; border-radius: 20px; }
+    .step-meta { margin-bottom: 14px; }
+    .step-counter { font-size: 16px; }
+    .step-time { font-size: 16px; }
+    .step-title { font-size: 64px; margin-bottom: 32px; }
+    .step-instruction { font-size: 34px; line-height: 1.45; }
+    .ingredients-label { font-size: 14px; margin-bottom: 14px; }
+    .ingredient-tag { font-size: 19px; padding: 10px 18px; }
+
+    .timer-panel { padding: 24px; max-height: 28vh; }
+    .panel-title { font-size: 16px; }
+    .add-timer-btn { font-size: 16px; padding: 12px 22px; }
+    .timer { padding: 18px 22px; }
+    .timer-name { font-size: 22px; }
+    .timer-display { font-size: 32px; }
+    .timer-btn { font-size: 14px; padding: 12px; }
+
+    .nav-btn {
+      font-size: 24px;
+      padding: 26px 40px;
+      min-height: 84px;
+      border-radius: 16px;
+    }
+    .nav-btn.prev { min-width: 200px; }
+    .dot { width: 14px; height: 14px; }
+  }
+
+  /* ============================================
+     TV-SCALE LANDSCAPE — 43" or 65" TCL mounted on the kitchen wall.
+     Triggers at min-width 1600px in landscape so it skips MacBook-class
+     displays. Bumps type ~1.7× for cooking-distance reading (6–12 ft).
+     Tuning targets: comfortable read from across the kitchen, no need
+     to walk up to the screen mid-bake.
+     ============================================ */
+  @media (orientation: landscape) and (min-width: 1600px) {
+    .app {
+      padding: 28px;
+      gap: 24px;
+      grid-template-columns: 1fr clamp(440px, 26vw, 640px);
+    }
+
+    /* HEADER */
+    .title       { font-size: 36px; }
+    .meta-line   { font-size: 20px; }
+    .clock       { font-size: 28px; }
+
+    /* SPOTIFY WIDGET — bumped so artist/track readable from distance */
+    .spotify-widget   { min-width: 380px; max-width: 520px; padding: 14px 22px 14px 14px; }
+    .spotify-art      { width: 80px; height: 80px; }
+    .spotify-track    { font-size: 22px; }
+    .spotify-artist   { font-size: 18px; }
+
+    /* MAIN STEP AREA */
+    .main             { padding: 52px; border-radius: 22px; }
+    .step-counter     { font-size: 20px; letter-spacing: 0.14em; }
+    .step-time        { font-size: 22px; gap: 10px; }
+    .suggested-timer-btn {
+      padding: 10px 22px;
+      border-radius: 12px;
+    }
+    .step-title       { font-size: 64px; margin-bottom: 32px; line-height: 1.05; }
+    .step-instruction { font-size: 36px; line-height: 1.45; padding-right: 14px; }
+
+    /* INGREDIENTS */
+    .ingredients-used  { margin-bottom: 32px; padding-bottom: 26px; }
+    .ingredients-label { font-size: 18px; margin-bottom: 14px; }
+    .ingredient-tag    { font-size: 24px; padding: 10px 18px; border-radius: 10px; }
+
+    /* COMPACT — applied per-step via JS for content-heavy steps that
+       would otherwise overflow the TV viewport. Tuned for 65" TV viewed
+       from ~20 ft: body text large enough to read from across the
+       kitchen, list spacing tightened so dense steps fit (or nearly
+       fit) without internal scrolling. */
+    .main.compact                    { padding: 34px; }
+    .main.compact .step-title        { font-size: 56px; margin-bottom: 22px; }
+    .main.compact .step-instruction  { font-size: 32px; line-height: 1.35; }
+    .main.compact .ingredients-used  { margin-bottom: 18px; padding-bottom: 14px; }
+    .main.compact .ingredients-label { font-size: 17px; margin-bottom: 8px; }
+    .main.compact .ingredient-tag    { font-size: 22px; padding: 8px 14px; }
+    .main.compact .step-list li      { margin-bottom: 0.45em; padding-left: 2.1em; }
+    .main.compact .step-list li::before { width: 1.5em; height: 1.5em; line-height: 1.5em; }
+
+    /* COMPACT-LIGHT — intermediate tier between compact and the base TV
+       sizing. For steps that have a numbered list (so the list overhead
+       eats vertical room) but aren't as dense as compact-tier steps.
+       Type is noticeably bigger than compact; spacing stays tight so the
+       step still fits on one screen. */
+    .main.compact-light                    { padding: 38px; }
+    .main.compact-light .step-title        { font-size: 60px; margin-bottom: 22px; }
+    .main.compact-light .step-instruction  { font-size: 36px; line-height: 1.32; }
+    .main.compact-light .ingredients-used  { margin-bottom: 18px; padding-bottom: 14px; }
+    .main.compact-light .ingredients-label { font-size: 17px; margin-bottom: 8px; }
+    .main.compact-light .ingredient-tag    { font-size: 23px; padding: 8px 14px; }
+    .main.compact-light .step-list li      { margin-bottom: 0.35em; padding-left: 2.1em; }
+    .main.compact-light .step-list li::before { width: 1.5em; height: 1.5em; line-height: 1.5em; }
+
+    /* TIMER PANEL */
+    .timer-panel { padding: 28px; gap: 18px; border-radius: 22px; }
+  }
+
+  /* ============================================
+     PHONE — primary controller, compact portrait
+     ============================================ */
+  @media (max-width: 768px) {
+    /* Phone = pure remote control. Override grid with flex so the big
+       buttons can grow to fill whatever vertical space remains. */
+    .app {
+      display: flex;
+      flex-direction: column;
+      padding: 10px;
+      padding-bottom: max(10px, env(safe-area-inset-bottom));
+      gap: 8px;
+    }
+    /* Header is a normal row: title-block on left, header-right (clock) on right. */
+    .header {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: nowrap;
+      order: 1;
+    }
+    .title-block {
+      flex: 1;
+      min-width: 0;
+    }
+    .title { font-size: 17px; }
+    .meta-line { font-size: 11px; }
+
+    .header-right {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .clock-block {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .clock { font-size: 14px; }
+
+    /* The Spotify widget gets MOVED by JS out of .header-right and into a
+       sibling position right above .controls. The styles below apply once
+       it's been moved (it has class "phone-detached" added to body via JS). */
+    body.phone-mode .spotify-widget {
+      width: 100%;
+      min-width: 0;
+      max-width: 100%;
+      padding: 0;
+      gap: 0;
+      align-items: stretch;
+      overflow: hidden;
+      flex: 0 0 auto;
+      order: 4;
+      height: 116px;
+    }
+
+    /* Album art on left fills full widget height (square) */
+    body.phone-mode .spotify-art {
+      width: 116px;
+      height: 116px;
+      border-radius: 0;
+      flex-shrink: 0;
+      object-fit: cover;
+    }
+    body.phone-mode .spotify-text {
+      flex: 1;
+      min-width: 0;
+      padding: 10px 14px 10px 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 3px;
+    }
+    body.phone-mode .spotify-track {
+      font-size: 14px;
+      max-width: none;
+      line-height: 1.2;
+    }
+    body.phone-mode .spotify-artist {
+      font-size: 12px;
+      max-width: none;
+      line-height: 1.2;
+    }
+    body.phone-mode .spotify-progress {
+      margin-top: 6px;
+      max-width: 100%;
+    }
+    /* Activate transport controls inline within the widget (PHONE ONLY) */
+    body.phone-mode .spotify-controls.active {
+      display: flex;
+      margin-top: 6px;
+    }
+
+    /* Timer panel: order 2 — just under the title row */
+    .timer-panel {
+      order: 2;
+      flex: 0 0 auto;
+      padding: 10px 10px 10px 10px;
+      max-height: none;
+      overflow: visible;
+    }
+    /* Horizontal scrolling row of compact timer cards */
+    #timers-container {
+      display: flex !important;
+      flex-direction: row;
+      grid-template-columns: none;
+      gap: 8px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+      padding-bottom: 2px;
+    }
+    #timers-container::-webkit-scrollbar { display: none; }
+
+    /* Compact timer card: just time + pause + cancel */
+    .timer {
+      flex: 0 0 auto;
+      min-width: 130px;
+      padding: 8px 10px;
+      border-left-width: 3px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .timer-row {
+      gap: 4px;
+    }
+    .timer-name { display: none; }
+    .timer-display { font-size: 22px; flex: 1; text-align: left; }
+    .timer-controls { gap: 4px; margin-top: 0; }
+    .timer-btn {
+      padding: 5px 0;
+      font-size: 11px;
+      flex: 1;
+    }
+    /* Hide reset button on phone (rarely used, saves space) */
+    .timer-btn:nth-child(2) { display: none; }
+    .empty-timers {
+      flex: 1;
+      padding: 14px;
+      font-size: 13px;
+    }
+
+    /* Compact step-info card — show step counter + title only, no instructions */
+    .main {
+      order: 3;
+      flex: 0 0 auto;
+      padding: 14px 16px;
+      border-radius: 12px;
+    }
+    .step-meta { margin-bottom: 6px; }
+    .step-counter, .step-time { font-size: 11px; }
+    .step-title { font-size: 20px; margin-bottom: 0; line-height: 1.2; }
+    .step-instruction { display: none; }
+    .ingredients-used { display: none; }
+
+    /* HUGE remote buttons — fill remaining vertical space */
+    .controls {
+      order: 5;
+      flex: 1;
+      min-height: 160px;
+      gap: 10px;
+      padding: 0;
+      align-items: stretch;
+    }
+    .nav-btn {
+      padding: 0 12px;
+      font-size: 24px;
+      font-weight: 800;
+      min-height: 0;
+      height: auto;
+      border-radius: 16px;
+    }
+    .nav-btn.prev {
+      flex: 0 0 30%;
+      min-width: 0;
+    }
+    .nav-btn.next {
+      flex: 1;
+      font-size: 28px;
+    }
+    .progress-dots { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- HEADER -->
+  <div class="header">
+    <div class="title-block">
+      <div class="title"><span class="accent" id="recipe-name">—</span></div>
+      <div class="meta-line" id="recipe-meta">—</div>
+    </div>
+    <div class="header-right">
+      <div class="spotify-widget" id="spotify-widget">
+        <img class="spotify-art" id="spotify-art" alt="">
+        <div class="spotify-text">
+          <div class="spotify-track" id="spotify-track">—</div>
+          <div class="spotify-artist" id="spotify-artist">—</div>
+          <div class="spotify-progress">
+            <div class="spotify-progress-fill" id="spotify-progress-fill"></div>
+          </div>
+          <!-- SPOTIFY CONTROLS (phone-only) -->
+          <div class="spotify-controls" id="spotify-controls">
+            <button class="spotify-btn" onclick="spotifyPrev()" aria-label="Previous track">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zM9.5 12L20 4v16z"/></svg>
+            </button>
+            <button class="spotify-btn play" id="spotify-play-btn" onclick="spotifyPlayPause()" aria-label="Play or pause">
+              <svg id="spotify-play-icon" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M8 5v14l11-7z"/></svg>
+              <svg id="spotify-pause-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+            </button>
+            <button class="spotify-btn" onclick="spotifyNext()" aria-label="Next track">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM4 4l10.5 8L4 20z"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="clock-block">
+        <span class="clock" id="clock">--:--</span>
+        <span class="sync-indicator" id="sync-indicator" title="Synced"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- TIMER PANEL -->
+  <div class="timer-panel">
+    <div class="panel-header">
+      <div class="panel-title">Timers</div>
+      <button class="add-timer-btn" onclick="openTimerModal()">+ New Timer</button>
+    </div>
+    <div id="timers-container"></div>
+  </div>
+
+  <!-- MAIN STEP AREA -->
+  <div class="main">
+    <div class="step-meta">
+      <div class="step-counter" id="step-counter">Step 1 of —</div>
+      <div class="step-time" id="step-time"></div>
+    </div>
+    <div class="step-title" id="step-title">—</div>
+    <div class="ingredients-used" id="ingredients-used" style="display:none;">
+      <div class="ingredients-label">For this step</div>
+      <div class="ingredients-list" id="ingredients-list"></div>
+    </div>
+    <div class="step-instruction" id="step-instruction">—</div>
+  </div>
+
+  <!-- CONTROLS -->
+  <div class="controls">
+    <button class="nav-btn prev" id="prev-btn" onclick="prevStep()">← Back</button>
+    <div class="progress-dots" id="progress-dots"></div>
+    <button class="nav-btn next" id="next-btn" onclick="nextStep()">Next →</button>
+  </div>
+</div>
+
+<!-- TIMER MODAL -->
+<div class="modal-overlay" id="timer-modal">
+  <div class="modal">
+    <h2>New Timer</h2>
+    <label>Name</label>
+    <input type="text" id="timer-name-input" placeholder="e.g. Bake, Cool, Eggs..." autocomplete="off">
+    <label>Duration</label>
+    <div class="duration-presets" id="duration-presets">
+      <button class="preset-btn" data-min="1">1m</button>
+      <button class="preset-btn" data-min="5">5m</button>
+      <button class="preset-btn" data-min="10">10m</button>
+      <button class="preset-btn" data-min="15">15m</button>
+      <button class="preset-btn" data-min="20">20m</button>
+      <button class="preset-btn" data-min="28">28m</button>
+      <button class="preset-btn" data-min="35">35m</button>
+      <button class="preset-btn" data-min="60">1h</button>
+    </div>
+    <input type="number" id="timer-custom-min" placeholder="Custom (minutes)" min="0" max="999" inputmode="decimal">
+    <div class="modal-actions">
+      <button class="modal-btn cancel" onclick="closeTimerModal()">Cancel</button>
+      <button class="modal-btn confirm" onclick="createTimer()">Start Timer</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================
+// RECIPE
+// ============================================
+const RECIPE = {
+  name: "Easy Chocolate Layer Cake",
+  metaLine: "Two-Layer Chocolate Cake  •  350°F  •  Two 9\" pans",
+  steps: [
+    {
+      title: "Set up and stage",
+      compactLight: true,
+      instruction: "Set a rack in the center of the oven and preheat to 350°F. Generously grease two 9\" round baking pans and line the bottoms with parchment rounds. Brew 1 cup of strong hot coffee and set aside — it goes into the batter while still hot. Set 340g unsalted butter (for the buttercream) on the counter to come to room temperature now — it needs to be soft when the cakes finish.",
+      timeNote: "10 min active, plus butter softening in background",
+      ingredients: [
+        { amount: "2", name: "9\" round pans, greased + parchment-lined" },
+        { amount: "1 cup", name: "strong hot coffee, brewed and held" },
+        { amount: "340g", name: "unsalted butter, out to soften (for buttercream)" }
+      ]
+    },
+    {
+      title: "Mix the dry ingredients",
+      instruction: "In a large bowl, whisk together 450g granulated sugar, 256g all-purpose flour, 110g cocoa powder (sift if lumpy), 1½ tsp baking powder, 1½ tsp baking soda, and 1½ tsp Diamond Crystal kosher salt. Whisk thoroughly until fully combined with no streaks or lumps.",
+      timeNote: "3 min active",
+      ingredients: [
+        { amount: "450g", name: "granulated sugar" },
+        { amount: "256g", name: "all-purpose flour" },
+        { amount: "110g", name: "cocoa powder (sifted)" },
+        { amount: "1½ tsp", name: "baking powder" },
+        { amount: "1½ tsp", name: "baking soda" },
+        { amount: "1½ tsp", name: "Diamond Crystal kosher salt" }
+      ]
+    },
+    {
+      title: "Mix the wet ingredients",
+      instruction: "In a medium bowl, whisk together 180ml neutral oil (canola or grapeseed), 240g sour cream, 3 large eggs, and 1 tbsp vanilla extract until smooth and uniform.",
+      timeNote: "3 min active",
+      ingredients: [
+        { amount: "180ml", name: "neutral oil (canola or grapeseed)" },
+        { amount: "240g", name: "sour cream" },
+        { amount: "3", name: "large eggs" },
+        { amount: "1 tbsp", name: "vanilla extract" }
+      ]
+    },
+    {
+      title: "Combine and fold in hot coffee",
+      instruction: "Add the wet mixture to the dry ingredients. With a hand mixer on low, mix until the dry ingredients are just moistened. Turn the mixer to medium-high and beat for a full 2 minutes, scraping the bottom and sides of the bowl halfway through. Then carefully fold in the 1 cup hot coffee with a flexible spatula until fully incorporated — the batter will be thin.",
+      timeNote: "5 min active — 2 min mixer time",
+      ingredients: [
+        { amount: "—", name: "dry mixture (Step 2)" },
+        { amount: "—", name: "wet mixture (Step 3)" },
+        { amount: "1 cup", name: "hot coffee" }
+      ]
+    },
+    {
+      title: "Divide and bake",
+      instruction: "Divide the batter evenly between the two prepared pans. Tap the pans on the counter a few times to release any large air bubbles. Transfer to the preheated 350°F oven. Bake until puffed and a toothpick inserted in the center comes out clean — start checking at 35 minutes; usually 35–40 min total.",
+      timeNote: "35–40 min bake — start timer, first check at 35 min",
+      ingredients: []
+    },
+    {
+      title: "Cool and turn out the cakes",
+      instruction: "Transfer the pans to a wire rack and cool for 20 minutes — set a timer. At 20 min, run a thin knife around the edge of each pan. Turn the cakes out onto the rack (you may need to gently tap the pan against the rack to release each cake). Peel off the parchment. Let the cakes cool completely before frosting.",
+      timeNote: "20 min in pan + ~30 min cooling",
+      ingredients: []
+    },
+    {
+      title: "Make the chocolate buttercream",
+      compact: true,
+      instruction: "While the cakes bake or cool, clean the mixer bowl. Add 340g room-temp butter and beat on medium-high until smooth, scraping the bowl occasionally. Add 450g confectioners' sugar, 140g cocoa powder, 60g sour cream, 60ml lukewarm milk, 1 tbsp vanilla, and ¾ tsp Diamond Crystal salt. Mix on low until the sugar and cocoa are moistened, then turn to medium-high and whip 5 minutes until smooth, fluffy, and light. Add more milk 1 tsp at a time if needed. Taste and add salt if desired.",
+      timeNote: "10 min active — includes 5 min whip",
+      ingredients: [
+        { amount: "340g", name: "unsalted butter (room temp)" },
+        { amount: "450g", name: "confectioners' sugar (sifted)" },
+        { amount: "140g", name: "cocoa powder (sifted)" },
+        { amount: "60g", name: "sour cream" },
+        { amount: "60ml", name: "lukewarm milk (plus more as needed)" },
+        { amount: "1 tbsp", name: "vanilla extract" },
+        { amount: "¾ tsp", name: "Diamond Crystal kosher salt" }
+      ]
+    },
+    {
+      title: "Crumb coat and chill",
+      compact: true,
+      instruction: "Just before assembling, stir the buttercream vigorously with a spatula to knock out air bubbles. Place a small dollop of buttercream on a serving plate or cake board to anchor the first layer. Set the first cake layer on top, puffed-side down. Spread about 1 heaping cup of buttercream evenly over the top. Place the second layer on top, puffed-side down, and press gently. Spread a thin crumb coat of buttercream over the top and sides — be careful not to drag crumbs back into the bowl. Refrigerate 30 minutes until the crumb coat is firm.",
+      timeNote: "15 min active + 30 min chill",
+      ingredients: [
+        { amount: "—", name: "two cooled cake layers" },
+        { amount: "~1 heaping cup", name: "buttercream (between layers)" },
+        { amount: "—", name: "additional buttercream (crumb coat)" }
+      ]
+    },
+    {
+      title: "Final frost and finish",
+      instruction: "Once the crumb coat is firm, spread the remaining buttercream over the top and sides of the cake in swoops and swirls. Top with sprinkles if using. Store at room temperature up to 4 days. For tidy slices, use a hot, clean, dry knife (run the knife under hot water and wipe between cuts).",
+      timeNote: "15 min active",
+      ingredients: [
+        { amount: "—", name: "remaining buttercream" },
+        { amount: "optional", name: "sprinkles" }
+      ]
+    }
+  ]
+};
+
+// ============================================
+// STATE — server is canonical
+// ============================================
+let currentStep = 0;
+let timers = [];
+let nextTimerId = 1;
+let lastVersion = -1;
+let isOnline = true;
+let selectedPresetMin = null;
+
+// ============================================
+// SERVER SYNC
+// ============================================
+async function fetchState() {
+  try {
+    const r = await fetch("/state", { cache: "no-store" });
+    if (!r.ok) throw new Error("server error");
+    const s = await r.json();
+    setOnline(true);
+    if (s.version !== lastVersion) {
+      lastVersion = s.version;
+      currentStep = s.currentStep || 0;
+      timers = s.timers || [];
+      nextTimerId = s.nextTimerId || 1;
+      renderStep();
+      renderTimers();
+    }
+  } catch (e) {
+    setOnline(false);
+  }
+}
+
+async function pushState() {
+  try {
+    const r = await fetch("/state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentStep, timers, nextTimerId })
+    });
+    if (!r.ok) throw new Error("push failed");
+    const s = await r.json();
+    lastVersion = s.version;
+    setOnline(true);
+  } catch (e) {
+    setOnline(false);
+  }
+}
+
+function setOnline(yes) {
+  if (yes === isOnline) return;
+  isOnline = yes;
+  const ind = document.getElementById("sync-indicator");
+  if (yes) {
+    ind.classList.remove("offline");
+    ind.title = "Synced";
+  } else {
+    ind.classList.add("offline");
+    ind.title = "Offline — server unreachable";
+  }
+}
+
+// ============================================
+// SPOTIFY
+// ============================================
+let spotifyState = null;
+let spotifyLastFetchMs = 0;
+
+async function fetchNowPlaying() {
+  try {
+    const r = await fetch("/now-playing", { cache: "no-store" });
+    if (!r.ok) return;
+    spotifyState = await r.json();
+    spotifyLastFetchMs = Date.now();
+    renderSpotify();
+  } catch (e) {
+    // silent — Spotify is optional
+  }
+}
+
+function renderSpotify() {
+  const widget = document.getElementById("spotify-widget");
+  const controls = document.getElementById("spotify-controls");
+
+  // Show whenever a track is loaded — even if paused — so the user can resume.
+  const hasTrack = spotifyState && spotifyState.track;
+
+  if (!hasTrack) {
+    widget.classList.remove("active");
+    controls.classList.remove("active");
+    return;
+  }
+
+  widget.classList.add("active");
+  controls.classList.add("active");
+
+  const art = document.getElementById("spotify-art");
+  if (spotifyState.art_url && art.src !== spotifyState.art_url) {
+    art.src = spotifyState.art_url;
+  }
+  document.getElementById("spotify-track").textContent = spotifyState.track || "—";
+  document.getElementById("spotify-artist").textContent = spotifyState.artist || "—";
+
+  // Toggle play/pause icon based on current state
+  const playIcon = document.getElementById("spotify-play-icon");
+  const pauseIcon = document.getElementById("spotify-pause-icon");
+  if (spotifyState.playing) {
+    playIcon.style.display = "none";
+    pauseIcon.style.display = "block";
+  } else {
+    playIcon.style.display = "block";
+    pauseIcon.style.display = "none";
+  }
+
+  // Smooth progress: estimate current ms based on last server fetch + elapsed wall time
+  if (spotifyState.duration_ms > 0) {
+    let currentMs = spotifyState.progress_ms || 0;
+    if (spotifyState.playing) {
+      const elapsedSinceFetch = Date.now() - spotifyLastFetchMs;
+      currentMs = Math.min(spotifyState.duration_ms, currentMs + elapsedSinceFetch);
+    }
+    const pct = (currentMs / spotifyState.duration_ms) * 100;
+    document.getElementById("spotify-progress-fill").style.width = pct + "%";
+  }
+}
+
+// Spotify playback controls — call server, which proxies to Spotify
+async function spotifyControl(action) {
+  try {
+    await fetch("/spotify-" + action, { method: "POST" });
+  } catch (e) {}
+  // Refresh now-playing soon to reflect the change
+  setTimeout(fetchNowPlaying, 350);
+  setTimeout(fetchNowPlaying, 1200);
+}
+function spotifyPrev() { spotifyControl("previous"); }
+function spotifyNext() { spotifyControl("next"); }
+function spotifyPlayPause() {
+  const action = (spotifyState && spotifyState.playing) ? "pause" : "play";
+  // Optimistic UI: flip the icon immediately so it feels instant
+  if (spotifyState) {
+    spotifyState.playing = !spotifyState.playing;
+    renderSpotify();
+  }
+  spotifyControl(action);
+}
+
+// ============================================
+// STEP NAVIGATION
+// ============================================
+function renderStep() {
+  const step = RECIPE.steps[currentStep];
+  document.getElementById("recipe-name").textContent = RECIPE.name;
+  document.getElementById("recipe-meta").textContent = RECIPE.metaLine;
+  document.getElementById("step-counter").textContent =
+    `Step ${currentStep + 1} of ${RECIPE.steps.length}`;
+  document.getElementById("step-title").textContent = step.title;
+
+  // Density modes for content-heavy steps on the TV layout. Two tiers:
+  //   compact      → tight type for the densest steps (e.g., 7/8)
+  //   compactLight → intermediate, for moderately dense steps (e.g., 1)
+  const mainEl = document.querySelector(".main");
+  mainEl.classList.toggle("compact", !!step.compact);
+  mainEl.classList.toggle("compact-light", !!step.compactLight);
+
+  // --- Render instruction as numbered sentences ---
+  const sentences = splitIntoSentences(step.instruction);
+  const instEl = document.getElementById("step-instruction");
+  if (sentences.length > 1) {
+    instEl.innerHTML = "<ol class='step-list'>" +
+      sentences.map(s => `<li>${escapeHtml(s)}</li>`).join("") +
+      "</ol>";
+  } else {
+    instEl.textContent = step.instruction;
+  }
+
+  // --- Render time note + suggested-timer button (when detectable) ---
+  const timeEl = document.getElementById("step-time");
+  timeEl.innerHTML = "";
+  if (step.timeNote) {
+    const span = document.createElement("span");
+    span.textContent = step.timeNote;
+    timeEl.appendChild(span);
+
+    const suggested = detectTimerFromTimeNote(step.timeNote);
+    if (suggested) {
+      const btn = document.createElement("button");
+      btn.className = "suggested-timer-btn";
+      btn.textContent = `▶ Start ${formatSuggestedDuration(suggested.minutes)} timer`;
+      btn.onclick = () => startSuggestedTimer(suggested.minutes, step.title);
+      timeEl.appendChild(btn);
+    }
+  }
+
+  const ingDiv = document.getElementById("ingredients-used");
+  const ingList = document.getElementById("ingredients-list");
+  if (step.ingredients && step.ingredients.length > 0) {
+    ingDiv.style.display = "block";
+    ingList.innerHTML = step.ingredients.map(ing =>
+      `<div class="ingredient-tag"><span class="amount">${escapeHtml(ing.amount)}</span>${escapeHtml(ing.name)}</div>`
+    ).join("");
+  } else {
+    ingDiv.style.display = "none";
+  }
+
+  document.getElementById("prev-btn").disabled = currentStep === 0;
+  const nextBtn = document.getElementById("next-btn");
+  if (currentStep === RECIPE.steps.length - 1) {
+    nextBtn.textContent = "Done ✓";
+  } else {
+    nextBtn.textContent = "Next →";
+  }
+
+  renderProgressDots();
+  document.getElementById("step-instruction").scrollTop = 0;
+}
+
+// Split a paragraph into sentences. Protects decimals (1.5) and abbreviations
+// (tsp., tbsp., 43g.) from being treated as sentence boundaries.
+function splitIntoSentences(text) {
+  if (!text) return [];
+  const protectedAbbr = ["tsp", "tbsp", "oz", "lb", "min", "hr", "g", "kg", "ml", "L"];
+  let working = text;
+  // Protect "1.5" -> "1<DOT>5"
+  working = working.replace(/(\d)\.(\d)/g, "$1<DOT>$2");
+  protectedAbbr.forEach(abbr => {
+    const re = new RegExp(`\\b${abbr}\\.`, "g");
+    working = working.replace(re, `${abbr}<DOT>`);
+  });
+  // Split on sentence-ending punctuation followed by space + capital letter
+  const parts = working.split(/(?<=[.!?])\s+(?=[A-Z])/);
+  return parts
+    .map(p => p.replace(/<DOT>/g, ".").trim())
+    .filter(p => p.length > 0);
+}
+
+// Parse timeNote for a duration to suggest. Returns {minutes} or null.
+//   "5 min — start timer" -> 5
+//   "28–35 min bake — first check at 25 min" -> 28 (lower bound)
+//   "15 min in pan + 45–60 min cooling" -> 15 (first match)
+//   "1 hr" -> 60
+//   "90 sec active" -> null (too short)
+//   "Overnight wait" -> null
+function detectTimerFromTimeNote(note) {
+  if (!note) return null;
+  const lower = note.toLowerCase();
+  const minuteMatch = lower.match(/(\d+)(?:\s*[-–]\s*(\d+))?\s*min\b/);
+  if (minuteMatch) {
+    const minutes = parseInt(minuteMatch[1]);
+    if (minutes >= 1 && minutes <= 480) return { minutes };
+  }
+  const hourMatch = lower.match(/(\d+)\s*(?:hr|hour)\b/);
+  if (hourMatch) return { minutes: parseInt(hourMatch[1]) * 60 };
+  return null;
+}
+
+function formatSuggestedDuration(minutes) {
+  if (minutes >= 60) {
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  }
+  return `${minutes}m`;
+}
+
+function startSuggestedTimer(minutes, stepTitle) {
+  const durationMs = minutes * 60 * 1000;
+  const name = (stepTitle || "Timer").split(" ").slice(0, 3).join(" ");
+  timers.push({
+    id: nextTimerId++,
+    name,
+    duration: durationMs,
+    endTime: Date.now() + durationMs,
+    paused: false,
+    pausedRemaining: null
+  });
+  renderTimers();
+  pushState();
+}
+
+function renderProgressDots() {
+  const container = document.getElementById("progress-dots");
+  container.innerHTML = RECIPE.steps.map((_, i) => {
+    let cls = "dot";
+    if (i < currentStep) cls += " complete";
+    else if (i === currentStep) cls += " current";
+    return `<div class="${cls}"></div>`;
+  }).join("");
+}
+
+function nextStep() {
+  if (currentStep < RECIPE.steps.length - 1) {
+    currentStep++;
+    renderStep();
+    pushState();
+  }
+}
+
+function prevStep() {
+  if (currentStep > 0) {
+    currentStep--;
+    renderStep();
+    pushState();
+  }
+}
+
+// ============================================
+// TIMERS
+// ============================================
+function openTimerModal() {
+  document.getElementById("timer-modal").classList.add("active");
+  document.getElementById("timer-name-input").value = "";
+  document.getElementById("timer-custom-min").value = "";
+  selectedPresetMin = null;
+  document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("selected"));
+  setTimeout(() => document.getElementById("timer-name-input").focus(), 50);
+}
+
+function closeTimerModal() {
+  document.getElementById("timer-modal").classList.remove("active");
+}
+
+document.querySelectorAll(".preset-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("selected"));
+    btn.classList.add("selected");
+    selectedPresetMin = parseInt(btn.dataset.min);
+    document.getElementById("timer-custom-min").value = "";
+  });
+});
+
+document.getElementById("timer-custom-min").addEventListener("input", () => {
+  document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("selected"));
+  selectedPresetMin = null;
+});
+
+function createTimer() {
+  const name = document.getElementById("timer-name-input").value.trim() || "Timer";
+  const customMin = parseFloat(document.getElementById("timer-custom-min").value);
+  const minutes = customMin > 0 ? customMin : selectedPresetMin;
+  if (!minutes || minutes <= 0) {
+    document.getElementById("timer-custom-min").focus();
+    return;
+  }
+  const durationMs = minutes * 60 * 1000;
+  timers.push({
+    id: nextTimerId++,
+    name,
+    duration: durationMs,
+    endTime: Date.now() + durationMs,
+    paused: false,
+    pausedRemaining: null
+  });
+  closeTimerModal();
+  renderTimers();
+  pushState();
+}
+
+function pauseTimer(id) {
+  const t = timers.find(t => t.id === id);
+  if (!t) return;
+  if (t.paused) {
+    t.endTime = Date.now() + t.pausedRemaining;
+    t.paused = false;
+    t.pausedRemaining = null;
+  } else {
+    t.pausedRemaining = t.endTime - Date.now();
+    t.paused = true;
+  }
+  renderTimers();
+  pushState();
+}
+
+function deleteTimer(id) {
+  timers = timers.filter(t => t.id !== id);
+  alertingTimers.delete(id);
+  renderTimers();
+  pushState();
+}
+
+function resetTimer(id) {
+  const t = timers.find(t => t.id === id);
+  if (!t) return;
+  t.endTime = Date.now() + t.duration;
+  t.paused = false;
+  t.pausedRemaining = null;
+  alertingTimers.delete(id);
+  renderTimers();
+  pushState();
+}
+
+function formatTime(ms) {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function renderTimers() {
+  const container = document.getElementById("timers-container");
+  if (!timers || timers.length === 0) {
+    container.innerHTML = '<div class="empty-timers">No timers running.<br>Tap + New Timer to start one.</div>';
+    return;
+  }
+  const now = Date.now();
+  container.innerHTML = timers.map(t => {
+    const remaining = t.paused ? t.pausedRemaining : (t.endTime - now);
+    let cls = "timer";
+    if (remaining <= 0) cls += " done";
+    else if (remaining < 60000) cls += " warning";
+    else if (!t.paused) cls += " running";
+    const display = remaining <= 0 ? "DONE" : formatTime(remaining);
+    return `
+      <div class="${cls}">
+        <div class="timer-row">
+          <div class="timer-name">${escapeHtml(t.name)}</div>
+          <div class="timer-display">${display}</div>
+        </div>
+        <div class="timer-controls">
+          <button class="timer-btn" onclick="pauseTimer(${t.id})">${t.paused ? "Resume" : "Pause"}</button>
+          <button class="timer-btn" onclick="resetTimer(${t.id})">Reset</button>
+          <button class="timer-btn danger" onclick="deleteTimer(${t.id})">×</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+// ============================================
+// AUDIO ALERT
+// ============================================
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) {
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) {}
+  }
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+}
+
+// Play a single chime tone with controlled envelope (sine + slight detuned harmonic for warmth).
+function playChime(freq, startTime, duration) {
+  if (!audioCtx) return;
+  const osc1 = audioCtx.createOscillator();
+  const osc2 = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+
+  osc1.type = "sine";
+  osc1.frequency.value = freq;
+  osc2.type = "sine";
+  osc2.frequency.value = freq * 2; // octave harmonic
+  osc1.connect(gain);
+  osc2.connect(gain);
+  gain.connect(audioCtx.destination);
+
+  // Envelope: quick attack, sustained body, long release for a "ding" feel
+  gain.gain.setValueAtTime(0, startTime);
+  gain.gain.linearRampToValueAtTime(0.5, startTime + 0.02);
+  gain.gain.linearRampToValueAtTime(0.4, startTime + 0.1);
+  gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+
+  osc1.start(startTime);
+  osc2.start(startTime);
+  osc1.stop(startTime + duration);
+  osc2.stop(startTime + duration);
+}
+
+// Play an ascending three-tone alert (C-E-G arpeggio) — attention-getting, kitchen-appropriate.
+function beep() {
+  try {
+    ensureAudio();
+    if (!audioCtx) return;
+    const t = audioCtx.currentTime;
+    playChime(523.25, t,        0.5);  // C5
+    playChime(659.25, t + 0.18, 0.5);  // E5
+    playChime(783.99, t + 0.36, 0.7);  // G5
+  } catch (e) {}
+}
+
+document.addEventListener("touchstart", ensureAudio, { once: true });
+document.addEventListener("click", ensureAudio, { once: true });
+
+// Track timers that are currently alerting. Beep repeats every 3 seconds until
+// the user dismisses the timer (taps × cancel) or pauses it.
+const alertingTimers = new Map(); // id -> last beep timestamp
+
+function flashScreen() {
+  // Visual backup — briefly tint the page in case audio is muted
+  const flash = document.createElement("div");
+  flash.style.cssText = "position:fixed;inset:0;background:rgba(74,222,128,0.25);pointer-events:none;z-index:9999;animation:flashOut 0.6s ease-out forwards;";
+  document.body.appendChild(flash);
+  setTimeout(() => flash.remove(), 700);
+}
+
+function checkTimers() {
+  const now = Date.now();
+  timers.forEach(t => {
+    const isDone = !t.paused && t.endTime <= now;
+
+    if (isDone) {
+      const lastAlert = alertingTimers.get(t.id);
+      // Beep on first detection OR every 3 seconds after
+      if (!lastAlert || (now - lastAlert) >= 3000) {
+        beep();
+        flashScreen();
+        // Buzz on supported devices (Android; iOS ignores)
+        if (navigator.vibrate) {
+          navigator.vibrate([200, 100, 200, 100, 200]);
+        }
+        alertingTimers.set(t.id, now);
+      }
+    } else {
+      // Timer is no longer done (deleted or reset) — stop alerting
+      alertingTimers.delete(t.id);
+    }
+  });
+
+  // Clean up alerts for timers that no longer exist
+  const liveIds = new Set(timers.map(t => t.id));
+  for (const id of alertingTimers.keys()) {
+    if (!liveIds.has(id)) alertingTimers.delete(id);
+  }
+}
+
+// ============================================
+// CLOCK
+// ============================================
+function updateClock() {
+  const d = new Date();
+  const h = d.getHours();
+  const m = String(d.getMinutes()).padStart(2, "0");
+  const ampm = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  document.getElementById("clock").textContent = `${h12}:${m} ${ampm}`;
+}
+
+// ============================================
+// KEYBOARD SHORTCUTS
+// ============================================
+document.addEventListener("keydown", e => {
+  if (document.getElementById("timer-modal").classList.contains("active")) {
+    if (e.key === "Enter") createTimer();
+    if (e.key === "Escape") closeTimerModal();
+    return;
+  }
+  if (e.key === "ArrowRight" || e.key === " ") { e.preventDefault(); nextStep(); }
+  if (e.key === "ArrowLeft") { e.preventDefault(); prevStep(); }
+  if (e.key === "t" || e.key === "T") openTimerModal();
+});
+
+// ============================================
+// WAKE LOCK (keep screen awake on iPhone during cooking)
+// ============================================
+let wakeLock = null;
+async function requestWakeLock() {
+  try {
+    if ("wakeLock" in navigator) {
+      wakeLock = await navigator.wakeLock.request("screen");
+    }
+  } catch (e) {}
+}
+document.addEventListener("touchstart", requestWakeLock, { once: true });
+document.addEventListener("click", requestWakeLock, { once: true });
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") requestWakeLock();
+});
+
+// ============================================
+// PHONE-LAYOUT WIDGET REPOSITION
+// ============================================
+// On phone (≤768px), move the Spotify widget out of .header-right and into
+// the main flex flow, where it sits just above the back/next remote buttons.
+// On larger screens, restore it inside .header-right (next to the clock).
+function applyPhoneLayout() {
+  const isPhone = window.matchMedia("(max-width: 768px)").matches;
+  const widget = document.getElementById("spotify-widget");
+  const headerRight = document.querySelector(".header-right");
+  const app = document.querySelector(".app");
+  if (!widget || !headerRight || !app) return;
+
+  if (isPhone) {
+    document.body.classList.add("phone-mode");
+    // Move widget to be a direct child of .app (so flex order applies)
+    if (widget.parentElement !== app) {
+      app.appendChild(widget);
+    }
+  } else {
+    document.body.classList.remove("phone-mode");
+    // Restore widget into .header-right (before .clock-block)
+    const clockBlock = document.querySelector(".clock-block");
+    if (widget.parentElement !== headerRight && clockBlock) {
+      headerRight.insertBefore(widget, clockBlock);
+    }
+  }
+}
+window.addEventListener("resize", applyPhoneLayout);
+
+// ============================================
+// INIT
+// ============================================
+applyPhoneLayout();
+renderStep();
+renderTimers();
+updateClock();
+fetchState();
+fetchNowPlaying();
+
+// Recipe state — fast polling
+setInterval(fetchState, 600);
+
+// Spotify — slower polling (server-side cache makes this cheap regardless)
+setInterval(fetchNowPlaying, 5000);
+
+// Local UI tick — countdowns, clock, smooth Spotify progress
+setInterval(() => {
+  renderTimers();
+  checkTimers();
+  updateClock();
+  renderSpotify();
+}, 1000);
+</script>
+</body>
+</html>
