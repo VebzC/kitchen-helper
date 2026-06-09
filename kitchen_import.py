@@ -291,14 +291,29 @@ Parsing rules:
 # ============================================
 
 _FRACTION_VALUES = {"½": 0.5, "¾": 0.75, "⅓": 1 / 3, "⅔": 2 / 3, "¼": 0.25, "⅛": 0.125}
+# Text forms for the schema's normalized units. Single-letter forms ("c" for
+# cup, "in" for inch) are deliberately excluded — they collide with ordinary
+# words/abbreviations, and a wrong unit token can create a false flag.
 _UNIT_SYNONYMS = {
-    "teaspoon": "tsp", "teaspoons": "tsp", "tsp": "tsp",
-    "tablespoon": "tbsp", "tablespoons": "tbsp", "tbsp": "tbsp",
+    "teaspoon": "tsp", "teaspoons": "tsp", "tsp": "tsp", "tsps": "tsp",
+    "tablespoon": "tbsp", "tablespoons": "tbsp", "tbsp": "tbsp", "tbsps": "tbsp",
+    "tbs": "tbsp", "tbl": "tbsp",
     "gram": "g", "grams": "g", "g": "g",
-    "kilogram": "kg", "kilograms": "kg", "kg": "kg",
+    "kilogram": "kg", "kilograms": "kg", "kg": "kg", "kgs": "kg",
     "ounce": "oz", "ounces": "oz", "oz": "oz",
     "pound": "lb", "pounds": "lb", "lb": "lb", "lbs": "lb",
+    "cup": "cup", "cups": "cup",
+    "milliliter": "ml", "milliliters": "ml", "millilitre": "ml", "millilitres": "ml", "ml": "ml",
+    "liter": "l", "liters": "l", "litre": "l", "litres": "l", "l": "l",
+    "piece": "piece", "pieces": "piece",
+    "inch": "inch", "inches": "inch",
 }
+# "fl oz" is a two-token unit — matched as a phrase, not via the word map.
+_FL_OZ_RE = re.compile(r"fl(?:uid)?\.?\s*(?:oz|ounces?)\b", re.IGNORECASE)
+# "count" has no reliable text form ("2 large eggs" carries no unit token), so
+# its unit check is skipped entirely. No-flag-on-uncertainty: false positives
+# train the cook to ignore flags, which destroys G2's value.
+_UNVERIFIABLE_UNITS = {"count"}
 
 def _numbers_near(snippet):
     """All numeric values in a snippet: unicode fractions (incl. mixed '1½'),
@@ -330,7 +345,14 @@ def _g2_check(recipe, source_text):
         pos = lower_source.find(ing.get("name", "").lower())
         if pos < 0 or not ing.get("name"):
             continue
-        window = source_text[max(0, pos - 60):pos + len(ing["name"]) + 30]
+        # The window is the single line where the name match starts: in an
+        # ingredient list the line IS the ingredient, and a wider window picks
+        # up quantities and units from neighboring lines.
+        line_start = source_text.rfind("\n", 0, pos) + 1
+        line_end = source_text.find("\n", pos)
+        if line_end == -1:
+            line_end = len(source_text)
+        window = source_text[line_start:line_end]
         found = _numbers_near(window)
         if not found:
             continue
@@ -342,8 +364,11 @@ def _g2_check(recipe, source_text):
             _UNIT_SYNONYMS[w] for w in re.findall(r"[a-zA-Z]+", window.lower())
             if w in _UNIT_SYNONYMS
         }
+        if _FL_OZ_RE.search(window):
+            units_in_window.add("fl_oz")
         unit_ok = (
             ing.get("unit_normalized") is None
+            or ing["unit_normalized"] in _UNVERIFIABLE_UNITS
             or not units_in_window
             or ing["unit_normalized"] in units_in_window
         )
@@ -397,6 +422,8 @@ def parse_with_claude(content, content_type, source_text=None):
     pages_processed = data.pop("pages_processed", [])
     low_confidence_fields = data.pop("low_confidence_fields", [])
     recipe = data
+    # schema_version is owned by code, not the model — it marks the recipe.json file-format version, bumped only when the schema design changes.
+    recipe["schema_version"] = "1.0"
 
     # This null check is a defensive safety net for malformed Claude responses. If logging shows L2's report_insufficient_content path is catching everything reliably, this whole block can be dropped.
     if (
@@ -466,11 +493,37 @@ if __name__ == "__main__":
     # G2 helpers
     assert _numbers_near("1½ cups (130g)") == [1.5, 130.0]
     assert sorted(_numbers_near("2 to 3 tbsp")) == [2.0, 3.0]
+
+    # Real mismatch still flags: flour parsed 500g but source says 250g.
     sample = {"ingredients": [
         {"name": "onions", "quantity_min": 130, "quantity_max": 130, "unit_normalized": "g"},
         {"name": "flour", "quantity_min": 500, "quantity_max": 500, "unit_normalized": "g"},
     ]}
     flags = _g2_check(sample, "1½ cups (130g) onions, sliced\n2 cups (250g) flour")
     assert len(flags) == 1 and flags[0]["field"] == "ingredients[1].quantity", flags
+
+    # Regression (2026-06-09 verification): cup- and ml-normalized ingredients
+    # adjacent to tsp/g lines, correctly parsed, must produce ZERO flags. The
+    # old ±60-char window leaked neighboring lines' units into the check.
+    regression = {"ingredients": [
+        {"name": "plain whole-milk yogurt", "quantity_min": 0.75, "quantity_max": 0.75, "unit_normalized": "cup"},
+        {"name": "vegetable oil", "quantity_min": 120, "quantity_max": 120, "unit_normalized": "ml"},
+    ]}
+    regression_source = (
+        "2 teaspoons baking powder\n"
+        "1 cup (200g) granulated sugar\n"
+        "¾ cup plain whole-milk yogurt\n"
+        "2 large eggs\n"
+        "½ cup (120ml) vegetable oil\n"
+        "1 teaspoon vanilla extract"
+    )
+    assert _g2_check(regression, regression_source) == [], _g2_check(regression, regression_source)
+
+    # Unit with no reliable text form ("count"): never flag on unit grounds,
+    # even when other unit tokens share the line.
+    count_case = {"ingredients": [
+        {"name": "eggs", "quantity_min": 2, "quantity_max": 2, "unit_normalized": "count"},
+    ]}
+    assert _g2_check(count_case, "2 large eggs (about 100g total)") == []
 
     print("kitchen_import self-tests passed")
