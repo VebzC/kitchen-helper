@@ -41,6 +41,7 @@ from pathlib import Path
 PORT = 8000
 SCRIPT_DIR = Path(__file__).parent.resolve()
 HTML_FILE = SCRIPT_DIR / "kitchen_display.html"
+IMPORT_HTML_FILE = SCRIPT_DIR / "kitchen_import.html"
 STATE_FILE = SCRIPT_DIR / "kitchen_state.json"
 
 def load_env(path=os.path.join(SCRIPT_DIR, ".env")):
@@ -63,6 +64,14 @@ def load_env(path=os.path.join(SCRIPT_DIR, ".env")):
     return env
 
 _ENV = load_env()
+
+# KITCHEN_PORT override (M3): lets verification run on a side port so live
+# kitchen devices (which poll port 8000) never see test traffic. The Spotify
+# redirect URI is registered against port 8000, so Spotify auth is 8000-only.
+try:
+    PORT = int(os.environ.get("KITCHEN_PORT") or PORT)
+except ValueError:
+    print(f"[warn] invalid KITCHEN_PORT {os.environ.get('KITCHEN_PORT')!r} — using {PORT}")
 
 # --- SPOTIFY CONFIG (set in .env or leave blank to disable) ---
 SPOTIFY_CLIENT_ID = _ENV.get("SPOTIFY_CLIENT_ID", "")
@@ -384,6 +393,27 @@ class Handler(BaseHTTPRequestHandler):
                 save_state(state)
                 self._json(state)
 
+        elif path == "/import":
+            try:
+                with open(IMPORT_HTML_FILE, "rb") as f:
+                    body = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self._cors()
+                self.end_headers()
+                self.wfile.write(body)
+            except FileNotFoundError:
+                self.send_error(404, f"import page not found at {IMPORT_HTML_FILE}")
+
+        elif path == "/import-status":
+            # The import page asks this on load so it can render the A5
+            # disabled message without burning a parse attempt.
+            self._json({
+                "enabled": kitchen_import is not None
+                           and bool(os.environ.get("ANTHROPIC_API_KEY", "").strip()),
+            })
+
         elif path == "/recipes":
             items = []
             try:
@@ -540,7 +570,10 @@ class Handler(BaseHTTPRequestHandler):
                 return
             started = time.time()
             try:
-                result = kitchen_import.parse_with_claude(payload, "paste", source_text=payload)
+                result = kitchen_import.parse_with_claude(
+                    payload, "paste", source_text=payload,
+                    target_recipe=req.get("target_recipe") or None,
+                )
             except Exception as e:
                 reason = (str(e).strip().splitlines() or [type(e).__name__])[0][:120]
                 kitchen_import.log_parse_event(
@@ -595,6 +628,26 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": f"save failed: {e}"}, code=500)
                 return
             self._json({"saved": True, "slug": slug})
+        elif path == "/review-event":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            if kitchen_import is None:
+                self._json({"error": "telemetry unavailable — kitchen_import.py failed to load"}, code=503)
+                return
+            try:
+                req = json.loads(body)
+            except Exception:
+                self._json({"error": "body must be JSON"}, code=400)
+                return
+            kitchen_import.log_review_event(
+                slug=req.get("slug"),
+                fields_edited=req.get("fields_edited"),
+                wrong_flags=req.get("wrong_flags"),
+                comments=req.get("comments"),
+                g2_flag_count=req.get("g2_flag_count", 0),
+                high_flags_acknowledged=req.get("high_flags_acknowledged", 0),
+            )
+            self._json({"ok": True})
         elif path == "/spotify-play":
             ok, msg = spotify_control("PUT", "play")
             self._json({"ok": ok, "error": msg})
@@ -632,6 +685,8 @@ def main():
     print(f"    http://localhost:{PORT}")
     print(f"\n  iPhone (same WiFi):")
     print(f"    http://{ip}:{PORT}")
+    print(f"\n  Import a recipe (laptop only):")
+    print(f"    http://localhost:{PORT}/import")
 
     if spotify_configured():
         tokens = load_spotify_tokens()

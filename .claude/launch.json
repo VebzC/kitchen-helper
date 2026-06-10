@@ -6,6 +6,18 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["kitchen_server.py"],
       "port": 8000
+    },
+    {
+      "name": "kitchen-test",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["KITCHEN_PORT=8001", "python3", "kitchen_server.py"],
+      "port": 8001
+    },
+    {
+      "name": "kitchen-test-nokey",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["KITCHEN_PORT=8001", "ANTHROPIC_API_KEY=", "python3", "kitchen_server.py"],
+      "port": 8001
     }
   ]
 }

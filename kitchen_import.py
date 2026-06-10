@@ -247,6 +247,11 @@ _RECORD_RECIPE_SCHEMA = {
             "items": {"type": "string"},
             "description": "JSON-path-ish refs to fields you are unsure about, e.g. 'ingredients[3].quantity_min'.",
         },
+        "other_recipes_detected": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Titles of OTHER complete recipes present in the input besides the one you parsed (R5). Empty/omitted when the input contains a single recipe.",
+        },
     },
     "required": [
         "schema_version", "title", "slug", "description", "yield", "servings",
@@ -289,6 +294,7 @@ Parsing rules:
 - Timers only for explicit durations in the text, with the exact source_phrase. State-based completions ("until golden brown") get no timer. min == max when the duration is not a range.
 - Preserve the author's stated times verbatim in `times`, even when prep + cook doesn't equal total — reconciliation is a display concern, not yours.
 - Serving suggestions, storage, and nutrition are recipe-level fields, never steps.
+- If the input contains MORE THAN ONE complete recipe, parse only one — the first, or the one named in the request — and list the other recipes' titles in other_recipes_detected.
 - Report honest self-assessment in pages_processed (single entry, page_index 0, for pasted text) and list any fields you are unsure about in low_confidence_fields."""
 
 # ============================================
@@ -390,12 +396,22 @@ def _g2_check(recipe, source_text):
 # PARSE
 # ============================================
 
-def parse_with_claude(content, content_type, source_text=None):
+def parse_with_claude(content, content_type, source_text=None, target_recipe=None):
     """One Claude call: parse `content` into the recipe schema. Returns
     {"status": "parsed", "recipe", "metadata", "g2_flags"} or
     {"status": "insufficient_content", "reason"}. Raises on API failure —
-    the endpoint surfaces it (D10: never silently save half-parsed output)."""
+    the endpoint surfaces it (D10: never silently save half-parsed output).
+    `target_recipe` names which recipe to parse when the input contains
+    several (R5 sequential import)."""
     import anthropic  # deferred so the module imports cleanly without the package
+
+    user_msg = "Parse this recipe (%s input):\n\n%s" % (content_type, content)
+    if target_recipe:
+        user_msg = (
+            "This input contains multiple recipes. Parse ONLY the recipe titled %r; "
+            "list any remaining other recipes in other_recipes_detected.\n\n%s"
+            % (target_recipe, user_msg)
+        )
 
     # Lazy client: never construct at module import time, so the module
     # imports cleanly when the key is blank. SDK default retries are kept
@@ -408,10 +424,7 @@ def parse_with_claude(content, content_type, source_text=None):
         model=MODEL,
         max_tokens=8000,
         system=_SYSTEM_PROMPT,
-        messages=[{
-            "role": "user",
-            "content": "Parse this recipe (%s input):\n\n%s" % (content_type, content),
-        }],
+        messages=[{"role": "user", "content": user_msg}],
         tools=_TOOLS,
         tool_choice={"type": "any"},
     )
@@ -426,6 +439,7 @@ def parse_with_claude(content, content_type, source_text=None):
     data = dict(tool_use.input)
     pages_processed = data.pop("pages_processed", [])
     low_confidence_fields = data.pop("low_confidence_fields", [])
+    other_recipes_detected = data.pop("other_recipes_detected", [])
     recipe = data
     # schema_version is owned by code, not the model — it marks the recipe.json file-format version, bumped only when the schema design changes.
     recipe["schema_version"] = "1.0"
@@ -451,6 +465,7 @@ def parse_with_claude(content, content_type, source_text=None):
         "source_url": None,
         "pages_processed": pages_processed,
         "low_confidence_fields": low_confidence_fields,
+        "other_recipes_detected": other_recipes_detected,
     }
     return {"status": "parsed", "recipe": recipe, "metadata": metadata, "g2_flags": g2_flags}
 
@@ -504,6 +519,7 @@ def save_recipe(recipe, metadata, source_bytes, source_ext, base_dir=None):
         "pages_processed": metadata.get("pages_processed", []),
         "low_confidence_fields": metadata.get("low_confidence_fields", []),
         "g2_flags": metadata.get("g2_flags", []),
+        "comments": metadata.get("comments"),  # reviewer notes (R2), null when none
     }
     with open(folder / "metadata.json", "w") as f:
         json.dump(meta_out, f, indent=2, ensure_ascii=False)
@@ -532,6 +548,27 @@ def log_parse_event(status, slug=None, source_type=None, parse_ms=None,
     }
     if error:
         event["error"] = error
+    try:
+        with open(LOG_FILE, "a") as f:
+            f.write(json.dumps(event) + "\n")
+    except Exception as e:
+        print("[warn] could not write import log: %s" % e)
+
+def log_review_event(slug=None, fields_edited=None, wrong_flags=None, comments=None,
+                     g2_flag_count=0, high_flags_acknowledged=0):
+    """Append one review_save JSON line per saved review (R6/A6): what the
+    human changed (passive), what they flagged as wrong (explicit), and their
+    free-text comments (qualitative). Append-only, never read at runtime."""
+    event = {
+        "event": "review_save",
+        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "slug": slug,
+        "fields_edited": fields_edited or [],
+        "wrong_flags": wrong_flags or [],
+        "comments": comments or "",
+        "g2_flag_count": g2_flag_count,
+        "high_flags_acknowledged": high_flags_acknowledged,
+    }
     try:
         with open(LOG_FILE, "a") as f:
             f.write(json.dumps(event) + "\n")
@@ -609,7 +646,15 @@ if __name__ == "__main__":
         assert saved["schema_version"] == "1.0" and saved["slug"] == "test-cake"
         meta_saved = json.load(open(folder / "metadata.json"))
         assert meta_saved["imported_at"] and meta_saved["g2_flags"] == []
+        assert meta_saved["comments"] is None  # no reviewer comments by default
         assert open(folder / "source.txt", "rb").read() == b"pasted text"
+
+        # Reviewer comments pass through to metadata.json (R2)
+        meta_with_comment = dict(meta_in, comments="step 3 split was wrong")
+        r = _sample_recipe()
+        r["slug"] = "commented-cake"
+        save_recipe(r, meta_with_comment, b"x", "txt", base_dir=tmp)
+        assert json.load(open(Path(tmp) / "commented-cake" / "metadata.json"))["comments"] == "step 3 split was wrong"
 
         # Collision: same slug again -> -2, then -3
         assert save_recipe(_sample_recipe(), meta_in, b"x", "txt", base_dir=tmp) == "test-cake-2"

@@ -1,0 +1,1106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Import Recipe — Kitchen</title>
+<style>
+  /* ============================================
+     THEME CONSTANTS — copied from kitchen_display.html, which is the
+     source of truth. If the display theme changes, re-copy this block.
+     ============================================ */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0e0e10;
+    --bg-card: #1a1a1e;
+    --bg-elevated: #25252b;
+    --border: #2e2e35;
+    --text: #f0efea;
+    --text-dim: #8a8a92;
+    --text-faint: #4a4a52;
+    --accent: #ff8c42;
+    --accent-dim: #b86530;
+    --warn: #ffb84d;
+    --done: #4ade80;
+    --danger: #f87171;
+  }
+  html, body {
+    min-height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ============================================
+     IMPORT PAGE (M3) — desktop-only review surface
+     ============================================ */
+  #phone-guard {
+    display: none;
+    padding: 40px 24px;
+    font-size: 18px;
+    color: var(--text-dim);
+    text-align: center;
+  }
+  @media (max-width: 768px) {
+    #phone-guard { display: block; }
+    #app { display: none !important; }
+  }
+
+  #app { padding: 20px 24px; }
+  .hidden { display: none !important; }
+
+  h1 { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 14px; }
+  h1 .accent { color: var(--accent); }
+
+  button {
+    font-family: inherit;
+    cursor: pointer;
+    border: none;
+    border-radius: 8px;
+    font-weight: 700;
+  }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ---- input stage ---- */
+  #input-stage { max-width: 980px; margin: 0 auto; }
+  #paste-input {
+    width: 100%;
+    min-height: 360px;
+    background: var(--bg-card);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    font-size: 15px;
+    line-height: 1.5;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    resize: vertical;
+  }
+  #paste-input:focus { outline: none; border-color: var(--accent-dim); }
+  .input-row { display: flex; align-items: center; gap: 16px; margin-top: 12px; }
+  #type-indicator { color: var(--text-dim); font-size: 14px; }
+  #type-indicator b { color: var(--text); }
+  #type-indicator a { color: var(--accent); cursor: pointer; text-decoration: underline; }
+  #import-btn {
+    margin-left: auto;
+    background: var(--accent);
+    color: var(--bg);
+    padding: 12px 28px;
+    font-size: 15px;
+    font-weight: 800;
+  }
+  #parse-status { margin-top: 14px; color: var(--warn); font-size: 15px; }
+  .msg { margin-top: 14px; padding: 14px 16px; border-radius: 10px; font-size: 14px; line-height: 1.5; }
+  .msg.error { background: rgba(248,113,113,0.12); border: 1px solid var(--danger); color: var(--text); }
+  .msg.info  { background: var(--bg-card); border: 1px solid var(--border); color: var(--text-dim); }
+  .msg.ok    { background: rgba(74,222,128,0.10); border: 1px solid var(--done); color: var(--text); }
+
+  /* ---- multi-recipe banner (R5) ---- */
+  #more-recipes { margin-top: 14px; }
+  #more-recipes button { background: var(--accent); color: var(--bg); padding: 8px 16px; margin-left: 10px; }
+
+  /* ---- review stage ---- */
+  #topbar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 14px;
+  }
+  #title-input {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 24px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    font-family: inherit;
+  }
+  #title-input:hover, #title-input:focus { border-color: var(--border); outline: none; background: var(--bg-card); }
+  .badge {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 12px;
+    padding: 5px 10px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .topbar-actions { display: flex; gap: 8px; }
+  .topbar-actions button { padding: 10px 18px; font-size: 13px; }
+  #discard-btn { background: var(--bg-card); color: var(--danger); border: 1px solid var(--border); }
+  #reparse-btn { background: var(--bg-card); color: var(--text); border: 1px solid var(--border); }
+  #save-btn { background: var(--accent); color: var(--bg); font-weight: 800; }
+  #save-btn.has-high { background: var(--warn); }
+
+  #columns { display: flex; gap: 14px; align-items: stretch; height: calc(100vh - 120px); }
+  .col {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px;
+    overflow-y: auto;
+  }
+  #col-source { flex: 2; }
+  #col-parsed { flex: 2; }
+  #col-flags  { flex: 1; min-width: 280px; max-width: 380px; }
+  .col h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+    font-weight: 700;
+  }
+  #source-text {
+    white-space: pre-wrap;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-dim);
+  }
+
+  /* parsed pane */
+  .meta-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+  .meta-cell label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-faint); margin-bottom: 3px; }
+  .meta-cell input {
+    width: 100%;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 13px;
+    font-family: inherit;
+  }
+  input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent-dim); }
+
+  .section-head {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--text-dim); font-weight: 700;
+    margin: 18px 0 8px;
+  }
+  .group-head { color: var(--accent); font-size: 12px; font-weight: 800; margin: 10px 0 4px; text-transform: uppercase; letter-spacing: 0.08em; }
+
+  .ing-row {
+    display: grid;
+    grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+    gap: 6px;
+    align-items: center;
+    padding: 6px 8px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+  }
+  .ing-row:hover { background: var(--bg-elevated); }
+  .ing-row input[type=text] {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text);
+    border-radius: 6px;
+    padding: 4px 6px;
+    font-size: 13px;
+    font-family: inherit;
+    width: 100%;
+  }
+  .ing-row input[type=text]:hover, .ing-row input[type=text]:focus { background: var(--bg); border-color: var(--border); }
+  .ing-sub { display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--text-faint); }
+  .numeric-readout {
+    font-size: 11px;
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    padding: 3px 6px;
+    border: 1px dashed transparent;
+    border-radius: 6px;
+  }
+  .opt-label { font-size: 11px; color: var(--text-faint); display: flex; align-items: center; gap: 3px; white-space: nowrap; }
+
+  .step-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+  }
+  .step-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .step-num { font-size: 12px; font-weight: 800; color: var(--accent); }
+  .kind-toggle {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 3px 8px; border-radius: 999px;
+    background: var(--bg); color: var(--text-dim); border: 1px solid var(--border);
+  }
+  .kind-toggle.cook { color: var(--accent); border-color: var(--accent-dim); }
+  .section-input {
+    background: transparent; border: 1px solid transparent; color: var(--text-dim);
+    font-size: 11px; border-radius: 6px; padding: 3px 6px; font-family: inherit;
+    width: 150px;
+  }
+  .section-input:hover, .section-input:focus { background: var(--bg); border-color: var(--border); }
+  .step-text {
+    width: 100%;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.45;
+    font-family: inherit;
+    resize: none;
+    padding: 4px 6px;
+    overflow: hidden;
+  }
+  .step-text:hover, .step-text:focus { background: var(--bg); border-color: var(--border); }
+  .timer-chip {
+    display: inline-block;
+    background: var(--bg);
+    border: 1px solid var(--accent-dim);
+    color: var(--accent);
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    margin: 4px 4px 0 0;
+  }
+  .step-actions { display: flex; gap: 6px; margin-top: 6px; }
+  .step-actions button {
+    background: var(--bg); color: var(--text-dim);
+    border: 1px solid var(--border);
+    font-size: 11px; padding: 4px 10px;
+  }
+  .step-actions button:hover { color: var(--text); }
+
+  /* wrong-flag tap (R6 explicit layer) */
+  .wrong-flag {
+    background: transparent; border: none;
+    color: var(--text-faint); font-size: 13px;
+    padding: 2px 5px; border-radius: 6px;
+  }
+  .wrong-flag:hover { color: var(--warn); }
+  .wrong-flag.tapped { color: var(--danger); }
+
+  /* inline flag marks */
+  .flag-critical { border-color: var(--danger) !important; }
+  .flag-high     { border-color: var(--warn) !important; border-style: solid !important; }
+  .flag-soft     { border-color: #e6d95a !important; border-style: dashed !important; }
+  .flash         { animation: flagFlash 1.2s ease-out; }
+  @keyframes flagFlash { 0% { background: rgba(255,184,77,0.35); } 100% { background: transparent; } }
+
+  /* flags sidebar */
+  .flag-entry {
+    border-left: 3px solid var(--border);
+    background: var(--bg-elevated);
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    font-size: 12px;
+    line-height: 1.45;
+    cursor: pointer;
+  }
+  .flag-entry.critical { border-left-color: var(--danger); }
+  .flag-entry.high     { border-left-color: var(--warn); }
+  .flag-entry.soft     { border-left-color: #e6d95a; }
+  .flag-entry .sev { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 800; display: block; margin-bottom: 2px; }
+  .flag-entry.critical .sev { color: var(--danger); }
+  .flag-entry.high .sev     { color: var(--warn); }
+  .flag-entry.soft .sev     { color: #e6d95a; }
+  #no-flags { color: var(--text-faint); font-size: 13px; font-style: italic; }
+
+  #comments-box {
+    width: 100%;
+    min-height: 80px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+    padding: 10px;
+    resize: vertical;
+    margin-top: 6px;
+  }
+
+  /* modal */
+  #modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.78);
+    display: none; align-items: center; justify-content: center;
+    z-index: 100;
+  }
+  #modal-overlay.active { display: flex; }
+  #modal {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+    width: 92%;
+    max-width: 540px;
+  }
+  #modal h3 { font-size: 18px; font-weight: 800; margin-bottom: 12px; }
+  #modal-body { font-size: 14px; color: var(--text-dim); line-height: 1.5; margin-bottom: 18px; max-height: 40vh; overflow-y: auto; }
+  #modal-body ul { margin: 8px 0 0 18px; }
+  #modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  #modal-actions button { padding: 10px 20px; font-size: 14px; }
+  #modal-cancel { background: var(--bg-elevated); color: var(--text-dim); }
+  #modal-confirm { background: var(--accent); color: var(--bg); font-weight: 800; }
+</style>
+</head>
+<body>
+
+<div id="phone-guard">This page is built for desktop — open it on the laptop.</div>
+
+<div id="app">
+  <!-- disabled (A5) -->
+  <div id="disabled-msg" class="hidden">
+    <h1>Import a <span class="accent">recipe</span></h1>
+    <div class="msg info">import disabled — set ANTHROPIC_API_KEY in .env</div>
+  </div>
+
+  <!-- INPUT STAGE -->
+  <div id="input-stage" class="hidden">
+    <h1>Import a <span class="accent">recipe</span></h1>
+    <textarea id="paste-input" placeholder="Paste the full recipe text here — ingredients and steps included." spellcheck="false"></textarea>
+    <div class="input-row">
+      <div id="type-indicator"></div>
+      <button id="import-btn" disabled>Import</button>
+    </div>
+    <div id="parse-status" class="hidden">Parsing with Claude — usually 20–30 s… <span id="elapsed">0</span>s</div>
+    <div id="input-msg" class="hidden msg"></div>
+    <div id="more-recipes" class="hidden msg info"></div>
+  </div>
+
+  <!-- REVIEW STAGE -->
+  <div id="review-stage" class="hidden">
+    <div id="topbar">
+      <input id="title-input" data-field="title" spellcheck="false" aria-label="Recipe title">
+      <span class="badge" id="badge-type"></span>
+      <span class="badge" id="badge-model"></span>
+      <span class="badge" id="badge-time"></span>
+      <div class="topbar-actions">
+        <button id="discard-btn">Discard</button>
+        <button id="reparse-btn">Re-parse</button>
+        <button id="save-btn">Save</button>
+      </div>
+    </div>
+    <div id="columns">
+      <div class="col" id="col-source">
+        <h2>Source</h2>
+        <div id="source-text"></div>
+      </div>
+      <div class="col" id="col-parsed">
+        <h2>Parsed recipe</h2>
+        <div class="meta-grid" id="meta-grid"></div>
+        <div class="section-head">Ingredients</div>
+        <div id="ingredients-list"></div>
+        <div class="section-head">Steps</div>
+        <div id="steps-list"></div>
+        <div class="section-head">Comments (saved with the recipe)</div>
+        <textarea id="comments-box" placeholder="Notes to self, parse feedback, anything…"></textarea>
+      </div>
+      <div class="col" id="col-flags">
+        <h2>Flags</h2>
+        <div id="flags-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SAVED STAGE -->
+  <div id="saved-stage" class="hidden">
+    <h1>Saved ✓</h1>
+    <div class="msg ok" id="saved-msg"></div>
+    <div class="input-row">
+      <button id="import-another-btn" style="background: var(--accent); color: var(--bg); padding: 12px 28px;">Import another</button>
+      <a href="/" style="color: var(--accent); font-size: 14px;">Open the kitchen display →</a>
+    </div>
+    <div id="more-recipes-saved" class="hidden msg info"></div>
+  </div>
+</div>
+
+<!-- CONFIRM MODAL -->
+<div id="modal-overlay">
+  <div id="modal">
+    <h3 id="modal-title"></h3>
+    <div id="modal-body"></div>
+    <div id="modal-actions">
+      <button id="modal-cancel">Cancel</button>
+      <button id="modal-confirm">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+// ============================================
+// STATE
+// ============================================
+let original = null;        // pristine /import response {recipe, metadata, g2_flags}
+let edited = null;          // deep-copied working recipe
+let sourceText = "";
+let chosenType = "paste";   // user-overridable detected type (D11)
+let wrongFlags = new Set(); // field refs tapped as "Claude got this wrong" (R6)
+let clearedFlags = new Set(); // high/soft refs cleared by editing the field
+let highAcknowledged = 0;   // count confirmed through the R4 dialog
+let pendingOthers = [];     // R5 queue of other recipe titles in this paste
+let currentTarget = null;   // R5: which recipe of a multi-recipe paste we parsed
+let parseMs = 0;
+let elapsedTimer = null;
+
+// ============================================
+// INPUT STAGE
+// ============================================
+function detectInputType(text) {
+  // Client-side mirror of kitchen_import.detect_input_type (D11):
+  // the WHOLE trimmed input must be one URL; inline URLs stay "paste".
+  return /^https?:\/\/\S+$/.test((text || "").trim()) ? "url" : "paste";
+}
+
+function refreshInputRow() {
+  const text = $("paste-input").value;
+  const detected = detectInputType(text);
+  if (!text.trim()) {
+    $("import-btn").disabled = true;
+    $("type-indicator").innerHTML = "";
+    return;
+  }
+  $("import-btn").disabled = false;
+  const other = chosenType === "paste" ? "url" : "paste";
+  $("type-indicator").innerHTML =
+    `Treating this as <b>${chosenType === "url" ? "URL" : "Paste"}</b> — <a id="type-toggle">change?</a>`;
+  $("type-toggle").onclick = () => { chosenType = other; refreshInputRow(); };
+}
+
+$("paste-input").addEventListener("input", () => {
+  chosenType = detectInputType($("paste-input").value); // re-detect; override lasts until next edit
+  refreshInputRow();
+});
+
+$("import-btn").addEventListener("click", () => {
+  submitParse($("paste-input").value, chosenType, currentTarget = null, false);
+});
+
+function showInputMsg(kind, html) {
+  const el = $("input-msg");
+  el.className = "msg " + kind;
+  el.innerHTML = html;
+  el.classList.remove("hidden");
+}
+
+async function submitParse(payload, type, target, keepComments) {
+  $("input-msg").classList.add("hidden");
+  $("more-recipes").classList.add("hidden");
+  $("import-btn").disabled = true;
+  $("paste-input").disabled = true;
+  $("parse-status").classList.remove("hidden");
+  const started = Date.now();
+  elapsedTimer = setInterval(() => { $("elapsed").textContent = Math.floor((Date.now() - started) / 1000); }, 250);
+
+  let r, data = null;
+  try {
+    const body = { type, payload };
+    if (target) body.target_recipe = target;
+    r = await fetch("/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    data = await r.json().catch(() => null);
+  } catch (e) {
+    r = null;
+  }
+  parseMs = Date.now() - started;
+  clearInterval(elapsedTimer);
+  $("parse-status").classList.add("hidden");
+  $("paste-input").disabled = false;
+  refreshInputRow();
+
+  if (!r) {
+    showInputMsg("error", "Could not reach the kitchen server — is it running?");
+    return;
+  }
+  if (r.status === 501) {
+    showInputMsg("info", "URL import lands in a later milestone — paste the page text instead.");
+    return;
+  }
+  if (!r.ok) {
+    showInputMsg("error", escapeHtml((data && data.error) || `parse failed (HTTP ${r.status})`));
+    return;
+  }
+  if (data.status === "insufficient_content") {
+    showInputMsg("info",
+      "No complete recipe found in that text — <b>" + escapeHtml(data.reason || "") + "</b><br>" +
+      "If the page is paywalled or behind a login: open it in your browser, log in, select all the visible " +
+      "recipe text (or take a screenshot for a later milestone), and paste that here. Your input is preserved above.");
+    return;
+  }
+  enterReview(data, payload, keepComments);
+}
+
+// ============================================
+// REVIEW STAGE
+// ============================================
+function enterReview(data, payload, keepComments) {
+  original = data;
+  sourceText = payload;
+  edited = JSON.parse(JSON.stringify(data.recipe));
+  wrongFlags.clear();
+  clearedFlags.clear();
+  highAcknowledged = 0;
+  if (!currentTarget) {
+    pendingOthers = [...(data.metadata.other_recipes_detected || [])];
+  }
+  if (!keepComments) $("comments-box").value = "";
+
+  $("input-stage").classList.add("hidden");
+  $("saved-stage").classList.add("hidden");
+  $("review-stage").classList.remove("hidden");
+
+  $("badge-type").textContent = data.metadata.source_type || "paste";
+  $("badge-model").textContent = data.metadata.model || "";
+  $("badge-time").textContent = (parseMs / 1000).toFixed(1) + "s parse";
+  $("title-input").value = edited.title || "";
+  $("source-text").textContent = sourceText;
+
+  renderMeta();
+  renderIngredients();
+  renderSteps();
+  refreshFlagsUI();
+}
+
+$("title-input").addEventListener("input", () => {
+  edited.title = $("title-input").value;
+  onFieldEdited("title");
+});
+
+// ---- meta fields ----
+const META_FIELDS = [
+  { ref: "yield",          label: "Yield",     get: r => r.yield,            set: (r, v) => r.yield = v },
+  { ref: "servings",       label: "Servings",  get: r => r.servings,         set: (r, v) => r.servings = v === "" ? null : Number(v) },
+  { ref: "times.prep_min", label: "Prep min",  get: r => r.times?.prep_min,  set: (r, v) => { r.times = r.times || {}; r.times.prep_min = v === "" ? null : Number(v); } },
+  { ref: "times.cook_min", label: "Cook min",  get: r => r.times?.cook_min,  set: (r, v) => { r.times = r.times || {}; r.times.cook_min = v === "" ? null : Number(v); } },
+  { ref: "times.total_min",label: "Total min", get: r => r.times?.total_min, set: (r, v) => { r.times = r.times || {}; r.times.total_min = v === "" ? null : Number(v); } },
+];
+
+function renderMeta() {
+  const grid = $("meta-grid");
+  grid.innerHTML = "";
+  META_FIELDS.forEach(f => {
+    const cell = document.createElement("div");
+    cell.className = "meta-cell";
+    cell.innerHTML = `<label>${f.label}</label>`;
+    const input = document.createElement("input");
+    input.value = f.get(edited) ?? "";
+    input.dataset.field = f.ref;
+    input.addEventListener("input", () => { f.set(edited, input.value); onFieldEdited(f.ref); });
+    cell.appendChild(input);
+    grid.appendChild(cell);
+  });
+}
+
+// ---- ingredients ----
+function numericReadout(ing) {
+  if (ing.quantity_min == null) return "— (non-scalable)";
+  const range = ing.quantity_min === ing.quantity_max || ing.quantity_max == null
+    ? String(ing.quantity_min)
+    : `${ing.quantity_min}–${ing.quantity_max}`;
+  return `${range} ${ing.unit_normalized || ""}`.trim();
+}
+
+function wrongFlagBtn(ref) {
+  const b = document.createElement("button");
+  b.className = "wrong-flag" + (wrongFlags.has(ref) ? " tapped" : "");
+  b.title = "Tap if Claude got this wrong (you don't have to fix it)";
+  b.textContent = "⚑";
+  b.onclick = () => {
+    wrongFlags.has(ref) ? wrongFlags.delete(ref) : wrongFlags.add(ref);
+    b.classList.toggle("tapped", wrongFlags.has(ref));
+  };
+  return b;
+}
+
+function renderIngredients() {
+  const list = $("ingredients-list");
+  list.innerHTML = "";
+  let prevGroup = null;
+  (edited.ingredients || []).forEach((ing, i) => {
+    const group = ing.group || null;
+    if (group && group !== prevGroup) {
+      const gh = document.createElement("div");
+      gh.className = "group-head";
+      gh.textContent = group;
+      list.appendChild(gh);
+    }
+    prevGroup = group;
+
+    const row = document.createElement("div");
+    row.className = "ing-row";
+    row.dataset.fieldRoot = `ingredients[${i}]`;
+
+    const mk = (prop, placeholder) => {
+      const inp = document.createElement("input");
+      inp.type = "text";
+      inp.value = ing[prop] ?? "";
+      inp.placeholder = placeholder;
+      inp.dataset.field = `ingredients[${i}].${prop}`;
+      inp.addEventListener("input", () => {
+        edited.ingredients[i][prop] = inp.value === "" && prop !== "display" && prop !== "name" ? null : inp.value;
+        if (prop === "group") renderIngredients();  // group headers move
+        onFieldEdited(`ingredients[${i}].${prop}`);
+      });
+      return inp;
+    };
+
+    row.appendChild(mk("display", "display text"));
+    row.appendChild(mk("name", "name"));
+    const sub = document.createElement("div");
+    sub.className = "ing-sub";
+    sub.appendChild(mk("notes", "notes"));
+    sub.appendChild(mk("group", "group"));
+    const opt = document.createElement("label");
+    opt.className = "opt-label";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = !!ing.optional;
+    cb.dataset.field = `ingredients[${i}].optional`;
+    cb.addEventListener("change", () => { edited.ingredients[i].optional = cb.checked; onFieldEdited(`ingredients[${i}].optional`); });
+    opt.appendChild(cb);
+    opt.appendChild(document.createTextNode("opt"));
+    sub.appendChild(opt);
+    row.appendChild(sub);
+
+    const right = document.createElement("div");
+    right.style.display = "flex";
+    right.style.alignItems = "center";
+    right.style.gap = "4px";
+    const readout = document.createElement("span");
+    readout.className = "numeric-readout";
+    readout.dataset.field = `ingredients[${i}].quantity`;
+    readout.title = "Structured numerics are read-only — if they're wrong, re-parse or leave a comment.";
+    readout.textContent = numericReadout(ing);
+    right.appendChild(readout);
+    right.appendChild(wrongFlagBtn(`ingredients[${i}]`));
+    row.appendChild(right);
+
+    list.appendChild(row);
+  });
+}
+
+// ---- steps ----
+function autoGrow(ta) {
+  ta.style.height = "auto";
+  ta.style.height = ta.scrollHeight + "px";
+}
+
+function timerChipText(t) {
+  const m = Math.round((t.duration_seconds_min || 0) / 60);
+  const M = Math.round((t.duration_seconds_max || t.duration_seconds_min || 0) / 60);
+  const span = m === M ? `${m} min` : `${m}–${M} min`;
+  return `⏱ ${t.label || "Timer"} ${span}`;
+}
+
+function renderSteps() {
+  const list = $("steps-list");
+  list.innerHTML = "";
+  (edited.steps || []).forEach((step, i) => {
+    const card = document.createElement("div");
+    card.className = "step-card";
+    card.dataset.fieldRoot = `steps[${i}]`;
+
+    const head = document.createElement("div");
+    head.className = "step-head";
+    head.innerHTML = `<span class="step-num">${i + 1}</span>`;
+
+    const kind = document.createElement("button");
+    kind.className = "kind-toggle " + (step.kind === "cook" ? "cook" : "");
+    kind.textContent = step.kind || "cook";
+    kind.dataset.field = `steps[${i}].kind`;
+    kind.title = "Toggle cook / prep";
+    kind.onclick = () => {
+      edited.steps[i].kind = edited.steps[i].kind === "cook" ? "prep" : "cook";
+      kind.textContent = edited.steps[i].kind;
+      kind.classList.toggle("cook", edited.steps[i].kind === "cook");
+      onFieldEdited(`steps[${i}].kind`);
+    };
+    head.appendChild(kind);
+
+    const section = document.createElement("input");
+    section.className = "section-input";
+    section.placeholder = "section (optional)";
+    section.value = step.section || "";
+    section.dataset.field = `steps[${i}].section`;
+    section.addEventListener("input", () => {
+      edited.steps[i].section = section.value || null;
+      onFieldEdited(`steps[${i}].section`);
+    });
+    head.appendChild(section);
+
+    head.appendChild(wrongFlagBtn(`steps[${i}]`));
+    card.appendChild(head);
+
+    const ta = document.createElement("textarea");
+    ta.className = "step-text";
+    ta.value = step.text || "";
+    ta.rows = 1;
+    ta.dataset.field = `steps[${i}].text`;
+    ta.addEventListener("input", () => {
+      edited.steps[i].text = ta.value;
+      autoGrow(ta);
+      onFieldEdited(`steps[${i}].text`);
+    });
+    card.appendChild(ta);
+    requestAnimationFrame(() => autoGrow(ta));
+
+    if ((step.timers || []).length) {
+      const chips = document.createElement("div");
+      step.timers.forEach(t => {
+        const chip = document.createElement("span");
+        chip.className = "timer-chip";
+        chip.textContent = timerChipText(t);
+        chips.appendChild(chip);
+      });
+      card.appendChild(chips);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "step-actions";
+    const splitBtn = document.createElement("button");
+    splitBtn.textContent = "Split here";
+    splitBtn.title = "Click in the step text to place the cursor, then split";
+    splitBtn.onclick = () => splitStep(i, ta.selectionStart);
+    actions.appendChild(splitBtn);
+    if (i > 0) {
+      const mergeBtn = document.createElement("button");
+      mergeBtn.textContent = "Merge with previous";
+      mergeBtn.onclick = () => mergeStep(i);
+      actions.appendChild(mergeBtn);
+    }
+    card.appendChild(actions);
+
+    list.appendChild(card);
+  });
+}
+
+// R3 split: text divides at the cursor into steps N and N+1. Timers follow
+// the half that contains their source_phrase (default: stay with N).
+function splitStep(i, pos) {
+  const t = edited.steps[i].text || "";
+  const a = t.slice(0, pos).trim();
+  const b = t.slice(pos).trim();
+  if (!a || !b) return; // nothing to split — cursor at an edge
+  const timers = edited.steps[i].timers || [];
+  const bTimers = timers.filter(tm => tm.source_phrase && b.includes(tm.source_phrase));
+  const aTimers = timers.filter(tm => !bTimers.includes(tm));
+  const first  = { ...edited.steps[i], text: a, timers: aTimers };
+  const second = { ...JSON.parse(JSON.stringify(edited.steps[i])), text: b, timers: bTimers };
+  edited.steps.splice(i, 1, first, second);
+  renderSteps();
+  refreshFlagsUI();
+}
+
+// R3 merge: text appended to the previous step; timers and metadata combined
+// (kind: "cook" wins — a merged prep+cook step is a cook step; section: the
+// previous step's, falling back to the merged one's).
+function mergeStep(i) {
+  if (i === 0) return;
+  const prev = edited.steps[i - 1], cur = edited.steps[i];
+  prev.text = (prev.text + " " + cur.text).trim();
+  prev.timers = (prev.timers || []).concat(cur.timers || []);
+  prev.kind = (prev.kind === "cook" || cur.kind === "cook") ? "cook" : "prep";
+  prev.section = prev.section || cur.section || null;
+  edited.steps.splice(i, 1);
+  renderSteps();
+  refreshFlagsUI();
+}
+
+// ============================================
+// FLAGS (R2) + SAVE MATRIX (R4)
+// ============================================
+function normalizeElRef(ref) {
+  // Numeric sub-fields all point at the read-only readout for that ingredient.
+  return ref.replace(/^(ingredients\[\d+\])\.(quantity_min|quantity_max|quantity|unit_normalized|unit)$/, "$1.quantity");
+}
+
+function computeActiveFlags() {
+  const flags = [];
+  if (!(edited.title || "").trim())
+    flags.push({ sev: "critical", ref: "title", label: "Title is empty" });
+  if (!(edited.ingredients || []).length)
+    flags.push({ sev: "critical", ref: null, label: "No ingredients" });
+  if (!(edited.steps || []).length)
+    flags.push({ sev: "critical", ref: null, label: "No steps" });
+
+  (original.g2_flags || []).forEach(f => {
+    if (clearedFlags.has(f.field)) return;
+    const p = f.parsed || {};
+    flags.push({
+      sev: "high", ref: f.field,
+      label: `Quantity check: parsed ${p.quantity_min}${p.quantity_max !== p.quantity_min ? "–" + p.quantity_max : ""} ${p.unit_normalized || ""} doesn't match the source near “${(f.source_snippet || "").slice(0, 70)}”`,
+    });
+  });
+  (original.metadata.pages_processed || []).forEach(p => {
+    if ((p.confidence ?? 1) < 0.7) {
+      flags.push({
+        sev: "high", ref: null,
+        label: `Low parse confidence (${p.confidence}) on page ${p.page_index}${(p.issues || []).length ? ": " + p.issues.join("; ") : ""}`,
+      });
+    }
+  });
+  (original.metadata.low_confidence_fields || []).forEach(f => {
+    if (clearedFlags.has(f)) return;
+    flags.push({ sev: "soft", ref: f, label: `Claude wasn't sure about ${f}` });
+  });
+  return flags;
+}
+
+function onFieldEdited(ref) {
+  // Editing a flagged field clears its high/soft flag — the human looked.
+  let changed = false;
+  computeActiveFlags().forEach(f => {
+    if (f.sev !== "critical" && f.ref && f.ref === ref && !clearedFlags.has(f.ref)) {
+      clearedFlags.add(f.ref);
+      changed = true;
+    }
+  });
+  refreshFlagsUI(); // critical flags are live; save button tracks every edit
+}
+
+function findFieldEl(ref) {
+  if (!ref) return null;
+  const norm = normalizeElRef(ref);
+  return document.querySelector(`[data-field="${CSS.escape(norm)}"]`)
+      || document.querySelector(`[data-field-root="${CSS.escape(norm.replace(/\.[a-z_]+$/, ""))}"]`);
+}
+
+function refreshFlagsUI() {
+  const flags = computeActiveFlags();
+
+  // inline marks
+  document.querySelectorAll(".flag-critical, .flag-high, .flag-soft")
+    .forEach(el => el.classList.remove("flag-critical", "flag-high", "flag-soft"));
+  flags.forEach(f => {
+    const el = findFieldEl(f.ref);
+    if (el) el.classList.add("flag-" + f.sev);
+  });
+
+  // sidebar
+  const list = $("flags-list");
+  list.innerHTML = "";
+  if (!flags.length) {
+    list.innerHTML = `<div id="no-flags">No flags — parse looks clean.</div>`;
+  }
+  const order = { critical: 0, high: 1, soft: 2 };
+  flags.sort((a, b) => order[a.sev] - order[b.sev]).forEach(f => {
+    const e = document.createElement("div");
+    e.className = "flag-entry " + f.sev;
+    e.innerHTML = `<span class="sev">${f.sev}</span>${escapeHtml(f.label)}`;
+    e.onclick = () => {
+      const el = findFieldEl(f.ref);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("flash");
+        setTimeout(() => el.classList.remove("flash"), 1300);
+      }
+    };
+    list.appendChild(e);
+  });
+
+  // save button (R4)
+  const crit = flags.filter(f => f.sev === "critical");
+  const high = flags.filter(f => f.sev === "high");
+  const btn = $("save-btn");
+  if (crit.length) {
+    btn.disabled = true;
+    btn.textContent = "Save";
+    btn.classList.remove("has-high");
+    btn.title = "Can't save: " + crit.map(f => f.label).join("; ");
+  } else if (high.length) {
+    btn.disabled = false;
+    btn.textContent = `Save with ${high.length} flag${high.length > 1 ? "s" : ""}`;
+    btn.classList.add("has-high");
+    btn.title = "";
+  } else {
+    btn.disabled = false;
+    btn.textContent = "Save";
+    btn.classList.remove("has-high");
+    btn.title = "";
+  }
+}
+
+// ============================================
+// SAVE / DISCARD / RE-PARSE (R4, R7)
+// ============================================
+function openModal(title, bodyHtml, onConfirm, confirmLabel) {
+  $("modal-title").textContent = title;
+  $("modal-body").innerHTML = bodyHtml;
+  $("modal-confirm").textContent = confirmLabel || "Confirm";
+  $("modal-overlay").classList.add("active");
+  $("modal-confirm").onclick = () => { closeModal(); onConfirm(); };
+}
+function closeModal() { $("modal-overlay").classList.remove("active"); }
+$("modal-cancel").onclick = closeModal;
+
+$("save-btn").addEventListener("click", () => {
+  const flags = computeActiveFlags();
+  if (flags.some(f => f.sev === "critical")) return; // button is disabled anyway
+  const high = flags.filter(f => f.sev === "high");
+  if (high.length) {
+    openModal(
+      `Save with ${high.length} unresolved flag${high.length > 1 ? "s" : ""}?`,
+      "These will be recorded in the recipe's metadata:<ul>" +
+        high.map(f => `<li>${escapeHtml(f.label)}</li>`).join("") + "</ul>",
+      () => { highAcknowledged = high.length; doSave(); },
+      "Save anyway"
+    );
+  } else {
+    doSave();
+  }
+});
+
+function diffRecipes(a, b) {
+  const out = [];
+  const j = v => JSON.stringify(v ?? null);
+  ["title", "description", "yield", "servings", "notes", "serving_suggestions", "storage"]
+    .forEach(k => { if (j(a[k]) !== j(b[k])) out.push(k); });
+  if (j(a.times) !== j(b.times)) out.push("times");
+  (a.ingredients || []).forEach((ing, i) => {
+    const bi = (b.ingredients || [])[i] || {};
+    ["display", "name", "notes", "optional", "group"].forEach(k => {
+      if (j(ing[k]) !== j(bi[k])) out.push(`ingredients[${i}].${k}`);
+    });
+  });
+  if ((a.steps || []).length !== (b.steps || []).length) out.push("steps.structure");
+  const n = Math.min((a.steps || []).length, (b.steps || []).length);
+  for (let i = 0; i < n; i++) {
+    ["text", "section", "kind"].forEach(k => {
+      if (j(a.steps[i][k]) !== j(b.steps[i][k])) out.push(`steps[${i}].${k}`);
+    });
+  }
+  return out;
+}
+
+async function doSave() {
+  const comments = $("comments-box").value.trim();
+  const metadata = { ...original.metadata, comments: comments || null };
+  const body = {
+    recipe: edited,
+    metadata,
+    g2_flags: original.g2_flags || [],
+    source_text: sourceText,
+  };
+  let r, data;
+  try {
+    r = await fetch("/recipes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    data = await r.json().catch(() => null);
+  } catch (e) { r = null; }
+  if (!r || !r.ok) {
+    openModal("Save failed", escapeHtml((data && data.error) || "server unreachable"), () => {}, "OK");
+    return;
+  }
+
+  // Review telemetry (R6) — best effort; a logging failure must not block.
+  try {
+    await fetch("/review-event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        slug: data.slug,
+        fields_edited: diffRecipes(original.recipe, edited),
+        wrong_flags: [...wrongFlags],
+        comments,
+        g2_flag_count: (original.g2_flags || []).length,
+        high_flags_acknowledged: highAcknowledged,
+      }),
+    });
+  } catch (e) {}
+
+  $("review-stage").classList.add("hidden");
+  $("saved-stage").classList.remove("hidden");
+  $("saved-msg").textContent = `Saved — “${edited.title}” is in the library (${data.slug}).`;
+  renderMoreBanner($("more-recipes-saved"));
+}
+
+$("import-another-btn").addEventListener("click", () => resetToInput(true));
+
+$("discard-btn").addEventListener("click", () => {
+  openModal(
+    "Discard this parse?",
+    "The parse and any edits you made will be thrown away. This can't be undone.",
+    () => { resetToInput(true); },
+    "Discard"
+  );
+});
+
+$("reparse-btn").addEventListener("click", () => {
+  // R7: recoverable, so no confirm. Comments survive a re-parse.
+  $("review-stage").classList.add("hidden");
+  $("input-stage").classList.remove("hidden");
+  $("paste-input").value = sourceText;
+  chosenType = "paste";
+  refreshInputRow();
+  submitParse(sourceText, "paste", currentTarget, true);
+});
+
+function resetToInput(clean) {
+  original = null; edited = null;
+  $("review-stage").classList.add("hidden");
+  $("saved-stage").classList.add("hidden");
+  $("input-stage").classList.remove("hidden");
+  if (clean) {
+    $("paste-input").value = "";
+    $("comments-box").value = "";
+    $("input-msg").classList.add("hidden");
+  }
+  refreshInputRow();
+  renderMoreBanner($("more-recipes"));
+}
+
+// ---- R5: multi-recipe paste ----
+function renderMoreBanner(el) {
+  if (!pendingOthers.length) { el.classList.add("hidden"); return; }
+  const next = pendingOthers[0];
+  el.innerHTML =
+    `Found ${pendingOthers.length} more recipe${pendingOthers.length > 1 ? "s" : ""} in this paste: ` +
+    `<b>${pendingOthers.map(escapeHtml).join(", ")}</b> — import next?` +
+    `<button id="${el.id}-next">Import “${escapeHtml(next)}”</button>`;
+  el.classList.remove("hidden");
+  $(el.id + "-next").onclick = () => {
+    currentTarget = pendingOthers.shift();
+    $("input-stage").classList.remove("hidden");
+    $("saved-stage").classList.add("hidden");
+    $("paste-input").value = sourceText;
+    refreshInputRow();
+    submitParse(sourceText, "paste", currentTarget, false);
+  };
+}
+
+// ============================================
+// INIT — blank key renders one disabled message (A5)
+// ============================================
+(async function init() {
+  let enabled = false;
+  try {
+    const r = await fetch("/import-status", { cache: "no-store" });
+    enabled = r.ok && (await r.json()).enabled;
+  } catch (e) {}
+  if (!enabled) {
+    $("disabled-msg").classList.remove("hidden");
+    return;
+  }
+  $("input-stage").classList.remove("hidden");
+  refreshInputRow();
+})();
+</script>
+</body>
+</html>
