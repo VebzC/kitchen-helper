@@ -6,5 +6,4 @@ kitchen_import_log.jsonl
 __pycache__/
 *.pyc
 *.bak
-recipes/
 .claude/settings.local.json

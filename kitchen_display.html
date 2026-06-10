@@ -604,6 +604,49 @@
   .modal-btn.confirm { background: var(--accent); color: var(--bg); }
 
   /* ============================================
+     M2 ADDITIONS — recipe picker (A3), section banner (S5), ingredient
+     group sub-headings (S2), timer recipe tags (A4). The banner and group
+     labels piggyback on .ingredients-label so they inherit the existing
+     TV/portrait type bumps without touching those media blocks.
+     ============================================ */
+  .recipe-picker {
+    display: none;
+    margin-top: 4px;
+    max-width: 100%;
+    align-self: flex-start;
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px 8px;
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .recipe-picker:focus { outline: none; border-color: var(--accent-dim); }
+  .recipe-picker option { background: var(--bg-card); color: var(--text); }
+
+  .step-section-banner {
+    display: none;
+    color: var(--accent);
+  }
+
+  .ingredient-group-label {
+    flex-basis: 100%;
+    /* !important beats the media blocks' .ingredients-label margin bumps —
+       inside the flex list the label needs to hug its group. */
+    margin-bottom: 2px !important;
+    margin-top: 6px;
+  }
+
+  .timer-recipe-tag {
+    color: var(--text-dim);
+    font-weight: 400;
+    font-size: 0.85em;
+    margin-left: 6px;
+  }
+
+  /* ============================================
      LANDSCAPE COLUMN PLACEMENT — steps in the wide left box, timers in
      the narrow right box. The HTML puts .timer-panel before .main, so
      grid auto-flow would otherwise drop the timers into the wide 1fr
@@ -956,6 +999,8 @@
     <div class="title-block">
       <div class="title"><span class="accent" id="recipe-name">—</span></div>
       <div class="meta-line" id="recipe-meta">—</div>
+      <select class="recipe-picker" id="recipe-picker" aria-label="Choose recipe"
+              onchange="onPickerChange(this.value)"></select>
     </div>
     <div class="header-right">
       <div class="spotify-widget" id="spotify-widget">
@@ -1003,6 +1048,7 @@
       <div class="step-counter" id="step-counter">Step 1 of —</div>
       <div class="step-time" id="step-time"></div>
     </div>
+    <div class="ingredients-label step-section-banner" id="step-section"></div>
     <div class="step-title" id="step-title">—</div>
     <div class="ingredients-used" id="ingredients-used" style="display:none;">
       <div class="ingredients-label">For this step</div>
@@ -1157,6 +1203,14 @@ let lastVersion = -1;
 let isOnline = true;
 let selectedPresetMin = null;
 
+// Recipe library (M2). null slug = the built-in RECIPE fallback.
+let recipeIndex = [];               // [{slug, title, last_imported}] from GET /recipes
+let activeRecipe = RECIPE;          // render model currently displayed
+let activeRecipeSlug = null;        // slug of activeRecipe (null = built-in)
+let lastAppliedSlug;                // last slug applied from state (undefined = never — first poll always applies)
+const recipeCache = {};             // slug -> adapted render model
+const seenRecipeSlugs = new Set();  // distinct recipes used this page session (A4 tag reveal)
+
 // ============================================
 // SERVER SYNC
 // ============================================
@@ -1171,6 +1225,11 @@ async function fetchState() {
       currentStep = s.currentStep || 0;
       timers = s.timers || [];
       nextTimerId = s.nextTimerId || 1;
+      const slug = s.currentRecipeSlug || null;
+      if (slug !== lastAppliedSlug) {
+        lastAppliedSlug = slug;
+        applyRecipeSlug(slug);  // async; re-renders once the recipe loads
+      }
       renderStep();
       renderTimers();
     }
@@ -1294,15 +1353,185 @@ function spotifyPlayPause() {
 }
 
 // ============================================
+// RECIPE LIBRARY (M2) — load saved recipes, picker, schema adapter
+// ============================================
+async function fetchRecipes() {
+  try {
+    const r = await fetch("/recipes", { cache: "no-store" });
+    if (!r.ok) return;
+    recipeIndex = await r.json();
+    renderPicker();
+  } catch (e) {
+    // library is optional — the display must work without it
+  }
+}
+
+function recipeTitleForSlug(slug) {
+  if (slug === null || slug === undefined) return RECIPE.name;
+  const entry = recipeIndex.find(r => r.slug === slug);
+  return entry ? entry.title : slug;
+}
+
+function renderPicker() {
+  const picker = document.getElementById("recipe-picker");
+  if (!recipeIndex.length) {
+    picker.style.display = "none";
+    return;
+  }
+  let opts = "";
+  if (activeRecipeSlug === null) {
+    opts += `<option value="" selected>Built-in: ${escapeHtml(RECIPE.name)}</option>`;
+  }
+  opts += recipeIndex.map(r =>
+    `<option value="${escapeHtml(r.slug)}"${r.slug === activeRecipeSlug ? " selected" : ""}>${escapeHtml(r.title)}</option>`
+  ).join("");
+  picker.innerHTML = opts;
+  picker.style.display = "block";
+}
+
+async function onPickerChange(slug) {
+  if (!slug || slug === activeRecipeSlug) return;
+  try {
+    const r = await fetch("/state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentRecipeSlug: slug, currentStep: 0 })
+    });
+    if (!r.ok) throw new Error("switch failed");
+    lastVersion = -1;   // force the next poll to re-apply server truth
+    fetchState();
+  } catch (e) {
+    setOnline(false);
+  }
+}
+
+async function applyRecipeSlug(slug) {
+  if (slug === null) {
+    applyActiveRecipe(null, RECIPE);
+    return;
+  }
+  if (recipeCache[slug]) {
+    applyActiveRecipe(slug, recipeCache[slug]);
+    return;
+  }
+  try {
+    const r = await fetch("/recipes/" + encodeURIComponent(slug), { cache: "no-store" });
+    if (!r.ok) throw new Error("recipe fetch " + r.status);
+    const adapted = adaptSchemaRecipe(await r.json());
+    recipeCache[slug] = adapted;
+    if (!recipeIndex.some(x => x.slug === slug)) fetchRecipes();  // index is stale
+    applyActiveRecipe(slug, adapted);
+  } catch (e) {
+    console.warn("could not load recipe", slug, e);
+    applyActiveRecipe(null, RECIPE);  // the cooking display must keep working
+  }
+}
+
+function applyActiveRecipe(slug, model) {
+  activeRecipe = model;
+  activeRecipeSlug = slug;
+  seenRecipeSlugs.add(slug === null ? "__builtin__" : slug);
+  renderStep();
+  renderTimers();
+  renderPicker();
+}
+
+// Maps a saved S1–S11 recipe.json to the render model the display already
+// knows: {name, metaLine, steps[{title, instruction, ...}]}. Saved steps are
+// one cooking action each and have no titles, so a short single-sentence step
+// renders AS the big title; longer steps get a truncated first-sentence title
+// with the full text in the instruction area. Per-step ingredient chips stay
+// legacy-only (deliberate gap — the future ingredient-highlight feature owns
+// per-step mapping); schema recipes show the full grouped ingredient list.
+function adaptSchemaRecipe(rec) {
+  let prevSection = null;
+  const steps = (rec.steps || []).map(s => {
+    const text = s.text || "";
+    const sentences = splitIntoSentences(text);
+    let title, instruction;
+    if (sentences.length <= 1 && text.length <= 80) {
+      title = text;
+      instruction = "";
+    } else {
+      title = truncateAtWord(sentences[0] || "", 60);
+      instruction = text;
+    }
+    const section = s.section || null;
+    const banner = !!(section && section !== prevSection);
+    prevSection = section;
+    return {
+      title,
+      instruction,
+      timeNote: null,
+      ingredients: [],
+      section,
+      sectionBanner: banner,
+      timersList: (s.timers || []).map(t => ({
+        label: t.label || "Timer",
+        secondsMin: t.duration_seconds_min || 0,
+        secondsMax: t.duration_seconds_max || t.duration_seconds_min || 0,
+      })),
+    };
+  });
+  return {
+    name: rec.title || "Recipe",
+    metaLine: buildMetaLine(rec),
+    isSchema: true,
+    fullIngredients: rec.ingredients || [],
+    steps: steps.length ? steps : [{ title: rec.title || "Recipe", instruction: "", ingredients: [], timersList: [] }],
+  };
+}
+
+function buildMetaLine(rec) {
+  const bits = [];
+  if (rec.servings) bits.push(`Serves ${rec.servings}`);
+  else if (rec.yield) bits.push(`Yield: ${rec.yield}`);
+  const t = rec.times || {};
+  if (t.prep_min) bits.push(`Prep ${t.prep_min} min`);
+  if (t.cook_min) bits.push(`Cook ${t.cook_min} min`);
+  if (!t.prep_min && !t.cook_min && t.total_min) bits.push(`Total ${t.total_min} min`);
+  return bits.join("  •  ") || rec.description || "";
+}
+
+function truncateAtWord(s, n) {
+  if (s.length <= n) return s;
+  const cut = s.slice(0, n);
+  const i = cut.lastIndexOf(" ");
+  return (i > 20 ? cut.slice(0, i) : cut) + "…";
+}
+
+function formatTimerRangeText(sMin, sMax) {
+  const mMin = Math.round(sMin / 60), mMax = Math.round(sMax / 60);
+  if (mMin <= 0) return Math.round(sMin) + " sec";
+  const f = m => (m >= 60 ? formatSuggestedDuration(m) : m + " min");
+  return mMin === mMax
+    ? f(mMin)
+    : `${mMin >= 60 ? formatSuggestedDuration(mMin) : mMin}–${f(mMax)}`;  // "35–40 min"
+}
+
+// ============================================
 // STEP NAVIGATION
 // ============================================
 function renderStep() {
-  const step = RECIPE.steps[currentStep];
-  document.getElementById("recipe-name").textContent = RECIPE.name;
-  document.getElementById("recipe-meta").textContent = RECIPE.metaLine;
+  // Render-side clamp: during a recipe switch the polled currentStep can
+  // briefly point past the still-displayed recipe's last step.
+  const idx = Math.max(0, Math.min(currentStep, activeRecipe.steps.length - 1));
+  const step = activeRecipe.steps[idx];
+  document.getElementById("recipe-name").textContent = activeRecipe.name;
+  document.getElementById("recipe-meta").textContent = activeRecipe.metaLine;
   document.getElementById("step-counter").textContent =
-    `Step ${currentStep + 1} of ${RECIPE.steps.length}`;
+    `Step ${idx + 1} of ${activeRecipe.steps.length}`;
   document.getElementById("step-title").textContent = step.title;
+
+  // Section banner (S5): shown only when the step's section differs from the
+  // previous step's (precomputed by the adapter; legacy steps never have it).
+  const sectionEl = document.getElementById("step-section");
+  if (step.sectionBanner) {
+    sectionEl.textContent = step.section;
+    sectionEl.style.display = "block";
+  } else {
+    sectionEl.style.display = "none";
+  }
 
   // Density modes for content-heavy steps on the TV layout. Two tiers:
   //   compact      → tight type for the densest steps (e.g., 7/8)
@@ -1325,7 +1554,17 @@ function renderStep() {
   // --- Render time note + suggested-timer button (when detectable) ---
   const timeEl = document.getElementById("step-time");
   timeEl.innerHTML = "";
-  if (step.timeNote) {
+  if (step.timersList && step.timersList.length > 0) {
+    // Schema steps carry parsed timers — one button each, range shown as
+    // "35–40 min"; the started timer uses the range minimum.
+    step.timersList.forEach(t => {
+      const btn = document.createElement("button");
+      btn.className = "suggested-timer-btn";
+      btn.textContent = `▶ ${t.label} — ${formatTimerRangeText(t.secondsMin, t.secondsMax)}`;
+      btn.onclick = () => startSchemaTimer(t.label, t.secondsMin);
+      timeEl.appendChild(btn);
+    });
+  } else if (step.timeNote) {
     const span = document.createElement("span");
     span.textContent = step.timeNote;
     timeEl.appendChild(span);
@@ -1342,7 +1581,33 @@ function renderStep() {
 
   const ingDiv = document.getElementById("ingredients-used");
   const ingList = document.getElementById("ingredients-list");
-  if (step.ingredients && step.ingredients.length > 0) {
+  const ingLabel = ingDiv.querySelector(".ingredients-label");
+  if (activeRecipe.isSchema) {
+    // Schema recipes (S2): the full recipe-level ingredient list, grouped by
+    // the source's sub-headings, on every step. Per-step chips are legacy-only
+    // (deliberate gap — no per-step ingredient mapping exists in the schema).
+    ingLabel.textContent = "Ingredients";
+    if (activeRecipe.fullIngredients.length > 0) {
+      // Clear the inline style instead of forcing "block" so the phone media
+      // query (which hides .ingredients-used — the phone is a remote, not a
+      // reading surface) still wins. Legacy recipes keep their longstanding
+      // inline-"block" behavior untouched.
+      ingDiv.style.display = "";
+      let html = "", prevGroup = null;
+      activeRecipe.fullIngredients.forEach(ing => {
+        const group = ing.group || null;
+        if (group && group !== prevGroup) {
+          html += `<div class="ingredients-label ingredient-group-label">${escapeHtml(group)}</div>`;
+        }
+        prevGroup = group;
+        html += `<div class="ingredient-tag">${escapeHtml(ing.display || ing.name || "")}</div>`;
+      });
+      ingList.innerHTML = html;
+    } else {
+      ingDiv.style.display = "none";
+    }
+  } else if (step.ingredients && step.ingredients.length > 0) {
+    ingLabel.textContent = "For this step";
     ingDiv.style.display = "block";
     ingList.innerHTML = step.ingredients.map(ing =>
       `<div class="ingredient-tag"><span class="amount">${escapeHtml(ing.amount)}</span>${escapeHtml(ing.name)}</div>`
@@ -1351,9 +1616,9 @@ function renderStep() {
     ingDiv.style.display = "none";
   }
 
-  document.getElementById("prev-btn").disabled = currentStep === 0;
+  document.getElementById("prev-btn").disabled = idx === 0;
   const nextBtn = document.getElementById("next-btn");
-  if (currentStep === RECIPE.steps.length - 1) {
+  if (idx === activeRecipe.steps.length - 1) {
     nextBtn.textContent = "Done ✓";
   } else {
     nextBtn.textContent = "Next →";
@@ -1420,24 +1685,41 @@ function startSuggestedTimer(minutes, stepTitle) {
     duration: durationMs,
     endTime: Date.now() + durationMs,
     paused: false,
-    pausedRemaining: null
+    pausedRemaining: null,
+    recipeSlug: activeRecipeSlug  // set once at creation; never rewritten (A4)
+  });
+  renderTimers();
+  pushState();
+}
+
+function startSchemaTimer(label, seconds) {
+  const durationMs = Math.max(1, Math.round(seconds)) * 1000;
+  timers.push({
+    id: nextTimerId++,
+    name: label,
+    duration: durationMs,
+    endTime: Date.now() + durationMs,
+    paused: false,
+    pausedRemaining: null,
+    recipeSlug: activeRecipeSlug  // set once at creation; never rewritten (A4)
   });
   renderTimers();
   pushState();
 }
 
 function renderProgressDots() {
+  const idx = Math.max(0, Math.min(currentStep, activeRecipe.steps.length - 1));
   const container = document.getElementById("progress-dots");
-  container.innerHTML = RECIPE.steps.map((_, i) => {
+  container.innerHTML = activeRecipe.steps.map((_, i) => {
     let cls = "dot";
-    if (i < currentStep) cls += " complete";
-    else if (i === currentStep) cls += " current";
+    if (i < idx) cls += " complete";
+    else if (i === idx) cls += " current";
     return `<div class="${cls}"></div>`;
   }).join("");
 }
 
 function nextStep() {
-  if (currentStep < RECIPE.steps.length - 1) {
+  if (currentStep < activeRecipe.steps.length - 1) {
     currentStep++;
     renderStep();
     pushState();
@@ -1497,7 +1779,8 @@ function createTimer() {
     duration: durationMs,
     endTime: Date.now() + durationMs,
     paused: false,
-    pausedRemaining: null
+    pausedRemaining: null,
+    recipeSlug: activeRecipeSlug  // set once at creation; never rewritten (A4)
   });
   closeTimerModal();
   renderTimers();
@@ -1555,6 +1838,9 @@ function renderTimers() {
     return;
   }
   const now = Date.now();
+  // Recipe tags stay hidden until a second distinct recipe has been used
+  // this page session — before that they exist in data but add only noise.
+  const showRecipeTags = seenRecipeSlugs.size >= 2;
   container.innerHTML = timers.map(t => {
     const remaining = t.paused ? t.pausedRemaining : (t.endTime - now);
     let cls = "timer";
@@ -1562,10 +1848,13 @@ function renderTimers() {
     else if (remaining < 60000) cls += " warning";
     else if (!t.paused) cls += " running";
     const display = remaining <= 0 ? "DONE" : formatTime(remaining);
+    const tagHtml = (showRecipeTags && t.recipeSlug !== undefined)
+      ? `<span class="timer-recipe-tag">(${escapeHtml(recipeTitleForSlug(t.recipeSlug))})</span>`
+      : "";
     return `
       <div class="${cls}">
         <div class="timer-row">
-          <div class="timer-name">${escapeHtml(t.name)}</div>
+          <div class="timer-name">${escapeHtml(t.name)}${tagHtml}</div>
           <div class="timer-display">${display}</div>
         </div>
         <div class="timer-controls">
@@ -1761,6 +2050,7 @@ applyPhoneLayout();
 renderStep();
 renderTimers();
 updateClock();
+fetchRecipes();
 fetchState();
 fetchNowPlaying();
 

@@ -26,6 +26,7 @@ Spotify (OPTIONAL):
 import base64
 import json
 import os
+import re
 import socket
 import threading
 import time
@@ -88,8 +89,12 @@ def default_state():
         "currentStep": 0,
         "timers": [],
         "nextTimerId": 1,
+        "currentRecipeSlug": None,
         "version": 0,
     }
+
+RECIPES_DIR = SCRIPT_DIR / "recipes"
+SLUG_RE = re.compile(r"^[a-z0-9-]+$")
 
 def load_state():
     if STATE_FILE.exists():
@@ -379,6 +384,45 @@ class Handler(BaseHTTPRequestHandler):
                 save_state(state)
                 self._json(state)
 
+        elif path == "/recipes":
+            items = []
+            try:
+                for rj in RECIPES_DIR.glob("*/recipe.json"):
+                    try:
+                        with open(rj) as f:
+                            rec = json.load(f)
+                        meta = {}
+                        meta_file = rj.parent / "metadata.json"
+                        if meta_file.exists():
+                            with open(meta_file) as f:
+                                meta = json.load(f)
+                        items.append({
+                            "slug": rj.parent.name,
+                            "title": rec.get("title") or rj.parent.name,
+                            "last_imported": meta.get("imported_at"),
+                        })
+                    except Exception:
+                        continue  # one bad folder must not break the library
+            except Exception:
+                pass  # missing/empty recipes/ -> [], never an error
+            items.sort(key=lambda x: x.get("last_imported") or "", reverse=True)
+            self._json(items)
+
+        elif path.startswith("/recipes/"):
+            slug = path[len("/recipes/"):]
+            if not SLUG_RE.fullmatch(slug):
+                self._json({"error": "invalid slug"}, code=400)
+                return
+            recipe_file = RECIPES_DIR / slug / "recipe.json"
+            if not recipe_file.exists():
+                self._json({"error": "unknown recipe"}, code=404)
+                return
+            try:
+                with open(recipe_file) as f:
+                    self._json(json.load(f))
+            except Exception as e:
+                self._json({"error": f"could not read recipe: {e}"}, code=500)
+
         elif path == "/now-playing":
             self._json(spotify_now_playing())
 
@@ -455,9 +499,15 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 update = json.loads(body)
                 with state_lock:
-                    for key in ("currentStep", "timers", "nextTimerId"):
+                    old_slug = state.get("currentRecipeSlug")
+                    for key in ("currentStep", "timers", "nextTimerId", "currentRecipeSlug"):
                         if key in update:
                             state[key] = update[key]
+                    # A4 invariant: switching recipes always restarts at step 0,
+                    # regardless of what the client sent. Timers are never
+                    # touched by a recipe switch.
+                    if "currentRecipeSlug" in update and update["currentRecipeSlug"] != old_slug:
+                        state["currentStep"] = 0
                     state["version"] = state.get("version", 0) + 1
                     save_state(state)
                     self._json(state)
@@ -515,6 +565,36 @@ class Handler(BaseHTTPRequestHandler):
                     "insufficient_content", source_type="paste", parse_ms=parse_ms,
                 )
             self._json(result)
+        elif path == "/recipes":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            if kitchen_import is None:
+                self._json({"error": "recipe save unavailable — kitchen_import.py failed to load"}, code=503)
+                return
+            try:
+                req = json.loads(body)
+                recipe = req["recipe"]
+                metadata = req.get("metadata") or {}
+                source_text = req.get("source_text") or ""
+                if not isinstance(recipe, dict):
+                    raise ValueError("recipe must be an object")
+                # /import returns g2_flags as a sibling of metadata; fold them
+                # into metadata.json's shape if the client didn't already.
+                metadata.setdefault("g2_flags", req.get("g2_flags", []))
+            except Exception as e:
+                self._json({"error": f"bad request: body must be JSON {{recipe, metadata, source_text}} ({e})"}, code=400)
+                return
+            try:
+                slug = kitchen_import.save_recipe(
+                    recipe, metadata, source_text.encode("utf-8"), "txt"
+                )
+            except ValueError as e:
+                self._json({"error": str(e)}, code=400)
+                return
+            except Exception as e:
+                self._json({"error": f"save failed: {e}"}, code=500)
+                return
+            self._json({"saved": True, "slug": slug})
         elif path == "/spotify-play":
             ok, msg = spotify_control("PUT", "play")
             self._json({"ok": ok, "error": msg})

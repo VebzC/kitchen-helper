@@ -22,6 +22,11 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 LOG_FILE = SCRIPT_DIR / "kitchen_import_log.jsonl"
+RECIPES_DIR = SCRIPT_DIR / "recipes"
+
+# Slug chars only — this is also the path-traversal guard: a slug containing
+# "/" or ".." must be impossible.
+_SLUG_RE = re.compile(r"^[a-z0-9-]+$")
 
 MODEL = "claude-opus-4-8"
 PARSER_VERSION = "kitchen_import 0.1"
@@ -450,6 +455,61 @@ def parse_with_claude(content, content_type, source_text=None):
     return {"status": "parsed", "recipe": recipe, "metadata": metadata, "g2_flags": g2_flags}
 
 # ============================================
+# PERSISTENCE (D9)
+# ============================================
+
+def save_recipe(recipe, metadata, source_bytes, source_ext, base_dir=None):
+    """Persist one recipe to disk per D9: recipes/<slug>/recipe.json,
+    source.<ext>, metadata.json. Returns the final slug (collision-suffixed
+    if needed). Raises ValueError on validation failure — the endpoint maps
+    that to a 400. `base_dir` exists for self-tests; production callers omit
+    it and get RECIPES_DIR."""
+    base = Path(base_dir) if base_dir else RECIPES_DIR
+
+    slug = recipe.get("slug") or ""
+    if not _SLUG_RE.fullmatch(slug):
+        raise ValueError("invalid slug %r — must match ^[a-z0-9-]+$" % slug)
+
+    # Re-enforce at the persistence boundary regardless of what the caller
+    # sent — reviewed-and-edited payloads can drift.
+    if (
+        not (recipe.get("title") or "").strip()
+        or not recipe.get("ingredients")
+        or not recipe.get("steps")
+    ):
+        raise ValueError("recipe needs a non-empty title, >=1 ingredient, and >=1 step")
+    # schema_version is owned by code, not the model — it marks the recipe.json file-format version, bumped only when the schema design changes.
+    recipe["schema_version"] = "1.0"
+
+    final_slug = slug
+    n = 2
+    while (base / final_slug).exists():
+        final_slug = "%s-%d" % (slug, n)
+        n += 1
+    recipe["slug"] = final_slug
+
+    folder = base / final_slug
+    folder.mkdir(parents=True)
+    with open(folder / "recipe.json", "w") as f:
+        json.dump(recipe, f, indent=2, ensure_ascii=False)
+    with open(folder / ("source." + source_ext), "wb") as f:
+        f.write(source_bytes or b"")
+    metadata = metadata or {}
+    meta_out = {
+        "imported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "model": metadata.get("model"),
+        "parser_version": metadata.get("parser_version"),
+        "source_type": metadata.get("source_type"),
+        "source_url": metadata.get("source_url"),
+        "pages_processed": metadata.get("pages_processed", []),
+        "low_confidence_fields": metadata.get("low_confidence_fields", []),
+        "g2_flags": metadata.get("g2_flags", []),
+    }
+    with open(folder / "metadata.json", "w") as f:
+        json.dump(meta_out, f, indent=2, ensure_ascii=False)
+    return final_slug
+
+# ============================================
 # LOGGING (A6)
 # ============================================
 
@@ -525,5 +585,53 @@ if __name__ == "__main__":
         {"name": "eggs", "quantity_min": 2, "quantity_max": 2, "unit_normalized": "count"},
     ]}
     assert _g2_check(count_case, "2 large eggs (about 100g total)") == []
+
+    # save_recipe (D9)
+    import tempfile
+
+    def _sample_recipe():
+        return {
+            "schema_version": 2.0,  # wrong on purpose — save must stamp "1.0"
+            "title": "Test Cake",
+            "slug": "test-cake",
+            "ingredients": [{"display": "1 egg", "name": "egg"}],
+            "steps": [{"text": "Bake it.", "kind": "cook", "timers": [], "section": None}],
+        }
+
+    with tempfile.TemporaryDirectory() as tmp:
+        meta_in = {"model": MODEL, "parser_version": PARSER_VERSION,
+                   "source_type": "paste", "source_url": None, "g2_flags": []}
+        slug = save_recipe(_sample_recipe(), meta_in, b"pasted text", "txt", base_dir=tmp)
+        assert slug == "test-cake"
+        folder = Path(tmp) / slug
+        assert sorted(p.name for p in folder.iterdir()) == ["metadata.json", "recipe.json", "source.txt"]
+        saved = json.load(open(folder / "recipe.json"))
+        assert saved["schema_version"] == "1.0" and saved["slug"] == "test-cake"
+        meta_saved = json.load(open(folder / "metadata.json"))
+        assert meta_saved["imported_at"] and meta_saved["g2_flags"] == []
+        assert open(folder / "source.txt", "rb").read() == b"pasted text"
+
+        # Collision: same slug again -> -2, then -3
+        assert save_recipe(_sample_recipe(), meta_in, b"x", "txt", base_dir=tmp) == "test-cake-2"
+        assert save_recipe(_sample_recipe(), meta_in, b"x", "txt", base_dir=tmp) == "test-cake-3"
+
+        # Malicious / malformed slugs are rejected (path-traversal guard)
+        for bad in ("../x", "a/b", "Test-Cake", "a b", "", "x..y"):
+            r = _sample_recipe()
+            r["slug"] = bad
+            try:
+                save_recipe(r, meta_in, b"x", "txt", base_dir=tmp)
+                raise AssertionError("slug %r should have been rejected" % bad)
+            except ValueError:
+                pass
+
+        # L3 re-enforced at the persistence boundary
+        r = _sample_recipe()
+        r["title"] = "  "
+        try:
+            save_recipe(r, meta_in, b"x", "txt", base_dir=tmp)
+            raise AssertionError("blank title should have been rejected")
+        except ValueError:
+            pass
 
     print("kitchen_import self-tests passed")
