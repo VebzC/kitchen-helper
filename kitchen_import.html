@@ -144,10 +144,45 @@
     border-radius: 14px;
     padding: 18px;
     overflow-y: auto;
+    min-width: 0;
   }
   #col-source { flex: 2; }
-  #col-parsed { flex: 2; }
+  #col-parsed { flex: 2; container-type: inline-size; }
   #col-flags  { flex: 1; min-width: 280px; max-width: 380px; }
+
+  /* ---- M3.1: resizable panes ---- */
+  .col-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .col-head h2 { margin-bottom: 0; }
+  .pane-toggle {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-faint);
+    border-radius: 6px;
+    font-size: 13px;
+    padding: 2px 8px;
+    line-height: 1.4;
+  }
+  .pane-toggle:hover { color: var(--text); border-color: var(--accent-dim); }
+  #pane-divider {
+    flex: 0 0 6px;
+    cursor: col-resize;
+    position: relative;
+    align-self: stretch;
+  }
+  #pane-divider::after {
+    content: "";
+    position: absolute;
+    inset: 10px 2px;
+    background: var(--border);
+    border-radius: 2px;
+    opacity: 0.6;
+  }
+  #pane-divider:hover::after, #pane-divider.dragging::after { background: var(--accent-dim); opacity: 1; }
+  #col-source.collapsed { padding: 10px 4px; overflow: hidden; }
+  #col-source.collapsed #source-text { display: none; }
+  #col-source.collapsed .col-head { justify-content: center; margin-bottom: 0; }
+  #col-source.collapsed .col-head h2 { display: none; }
+  #col-source.collapsed + #pane-divider { display: none; }
   .col h2 {
     font-size: 12px;
     text-transform: uppercase;
@@ -186,12 +221,39 @@
   }
   .group-head { color: var(--accent); font-size: 12px; font-weight: 800; margin: 10px 0 4px; text-transform: uppercase; letter-spacing: 0.08em; }
 
-  .ing-row {
+  /* ---- M3.1: aligned ingredient grid ----
+     Header and every row share one template, so columns line up down the
+     page: display 2fr | name 1fr | notes 1.2fr | group 0.8fr | opt | qty | ⚑.
+     Hairline left borders give quiet vertical column separation. */
+  .ing-grid {
     display: grid;
-    grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr) minmax(0, 1fr) auto;
-    gap: 6px;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 0.8fr) 36px 112px 28px;
     align-items: center;
-    padding: 6px 8px;
+  }
+  .ing-cell {
+    min-width: 0;
+    padding: 2px 6px;
+    border-left: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  .ing-cell:first-child { border-left: none; }
+  .ing-header {
+    padding: 4px 8px 2px;
+    margin-bottom: 2px;
+    /* same 1px border box as .ing-row so header cells line up with row cells */
+    border: 1px solid transparent;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+  }
+  .ing-header .ing-cell {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-faint);
+    font-weight: 700;
+    border-left-color: transparent;
+  }
+  .ing-row {
+    padding: 3px 8px;
     border: 1px solid transparent;
     border-radius: 8px;
   }
@@ -207,17 +269,30 @@
     width: 100%;
   }
   .ing-row input[type=text]:hover, .ing-row input[type=text]:focus { background: var(--bg); border-color: var(--border); }
-  .ing-sub { display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--text-faint); }
   .numeric-readout {
+    display: block;
     font-size: 11px;
     color: var(--text-faint);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     padding: 3px 6px;
     border: 1px dashed transparent;
     border-radius: 6px;
   }
-  .opt-label { font-size: 11px; color: var(--text-faint); display: flex; align-items: center; gap: 3px; white-space: nowrap; }
+  .opt-label { font-size: 11px; color: var(--text-faint); display: flex; align-items: center; justify-content: center; }
+
+  /* Narrow pane (dragged small): notes + group drop to a second line inside
+     the row instead of truncating invisibly. */
+  @container (max-width: 600px) {
+    .ing-grid {
+      grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) 36px 96px 28px;
+    }
+    .ing-cell.cell-notes { grid-column: 1 / 3; grid-row: 2; border-left: none; }
+    .ing-cell.cell-group { grid-column: 3 / 6; grid-row: 2; }
+    .ing-header .cell-notes, .ing-header .cell-group { display: none; }
+  }
 
   .step-card {
     background: var(--bg-elevated);
@@ -386,9 +461,13 @@
     </div>
     <div id="columns">
       <div class="col" id="col-source">
-        <h2>Source</h2>
+        <div class="col-head">
+          <h2>Source</h2>
+          <button class="pane-toggle" id="collapse-src" title="Collapse the source pane">«</button>
+        </div>
         <div id="source-text"></div>
       </div>
+      <div id="pane-divider" title="Drag to resize"></div>
       <div class="col" id="col-parsed">
         <h2>Parsed recipe</h2>
         <div class="meta-grid" id="meta-grid"></div>
@@ -562,6 +641,7 @@ function enterReview(data, payload, keepComments) {
   $("input-stage").classList.add("hidden");
   $("saved-stage").classList.add("hidden");
   $("review-stage").classList.remove("hidden");
+  applyPaneLayout();  // clamps need the columns to be visible to measure
 
   $("badge-type").textContent = data.metadata.source_type || "paste";
   $("badge-model").textContent = data.metadata.model || "";
@@ -629,6 +709,20 @@ function wrongFlagBtn(ref) {
 function renderIngredients() {
   const list = $("ingredients-list");
   list.innerHTML = "";
+
+  // M3.1: header row + uniform grid — every row shares .ing-grid's template,
+  // so columns align perfectly down the page.
+  const header = document.createElement("div");
+  header.className = "ing-grid ing-header";
+  [["Ingredient (display)", ""], ["Name", ""], ["Notes", "cell-notes"],
+   ["Group", "cell-group"], ["Opt", ""], ["Qty", ""], ["", ""]].forEach(([label, extra]) => {
+    const c = document.createElement("div");
+    c.className = "ing-cell" + (extra ? " " + extra : "");
+    c.textContent = label;
+    header.appendChild(c);
+  });
+  list.appendChild(header);
+
   let prevGroup = null;
   (edited.ingredients || []).forEach((ing, i) => {
     const group = ing.group || null;
@@ -641,8 +735,15 @@ function renderIngredients() {
     prevGroup = group;
 
     const row = document.createElement("div");
-    row.className = "ing-row";
+    row.className = "ing-grid ing-row";
     row.dataset.fieldRoot = `ingredients[${i}]`;
+
+    const cell = (cls, child) => {
+      const c = document.createElement("div");
+      c.className = "ing-cell" + (cls ? " " + cls : "");
+      c.appendChild(child);
+      return c;
+    };
 
     const mk = (prop, placeholder) => {
       const inp = document.createElement("input");
@@ -658,12 +759,11 @@ function renderIngredients() {
       return inp;
     };
 
-    row.appendChild(mk("display", "display text"));
-    row.appendChild(mk("name", "name"));
-    const sub = document.createElement("div");
-    sub.className = "ing-sub";
-    sub.appendChild(mk("notes", "notes"));
-    sub.appendChild(mk("group", "group"));
+    row.appendChild(cell("", mk("display", "display text")));
+    row.appendChild(cell("", mk("name", "name")));
+    row.appendChild(cell("cell-notes", mk("notes", "notes")));
+    row.appendChild(cell("cell-group", mk("group", "group")));
+
     const opt = document.createElement("label");
     opt.className = "opt-label";
     const cb = document.createElement("input");
@@ -672,23 +772,16 @@ function renderIngredients() {
     cb.dataset.field = `ingredients[${i}].optional`;
     cb.addEventListener("change", () => { edited.ingredients[i].optional = cb.checked; onFieldEdited(`ingredients[${i}].optional`); });
     opt.appendChild(cb);
-    opt.appendChild(document.createTextNode("opt"));
-    sub.appendChild(opt);
-    row.appendChild(sub);
+    row.appendChild(cell("", opt));
 
-    const right = document.createElement("div");
-    right.style.display = "flex";
-    right.style.alignItems = "center";
-    right.style.gap = "4px";
     const readout = document.createElement("span");
     readout.className = "numeric-readout";
     readout.dataset.field = `ingredients[${i}].quantity`;
-    readout.title = "Structured numerics are read-only — if they're wrong, re-parse or leave a comment.";
+    readout.title = numericReadout(ing) + " — read-only; if wrong, re-parse or leave a comment.";
     readout.textContent = numericReadout(ing);
-    right.appendChild(readout);
-    right.appendChild(wrongFlagBtn(`ingredients[${i}]`));
-    row.appendChild(right);
+    row.appendChild(cell("", readout));
 
+    row.appendChild(cell("", wrongFlagBtn(`ingredients[${i}]`)));
     list.appendChild(row);
   });
 }
@@ -1084,6 +1177,67 @@ function renderMoreBanner(el) {
     submitParse(sourceText, "paste", currentTarget, false);
   };
 }
+
+// ============================================
+// PANE SIZING (M3.1) — drag divider + collapsible source pane, persisted
+// ============================================
+const PANE_LS_WIDTH = "kitchenImport.sourceWidth";
+const PANE_LS_COLLAPSED = "kitchenImport.sourceCollapsed";
+const SOURCE_MIN = 200, PARSED_MIN = 500, COLLAPSED_W = 36;
+
+function clampSourceWidth(w) {
+  const cols = $("columns");
+  const flagsW = $("col-flags").getBoundingClientRect().width;
+  const fixed = flagsW + 6 + 3 * 14; // divider width + the three flex gaps
+  const max = cols.clientWidth - fixed - PARSED_MIN;
+  return Math.round(Math.max(SOURCE_MIN, Math.min(w, Math.max(SOURCE_MIN, max))));
+}
+
+function applyPaneLayout() {
+  const src = $("col-source");
+  const collapsed = localStorage.getItem(PANE_LS_COLLAPSED) === "1";
+  src.classList.toggle("collapsed", collapsed);
+  const toggle = $("collapse-src");
+  toggle.textContent = collapsed ? "»" : "«";
+  toggle.title = collapsed ? "Restore the source pane" : "Collapse the source pane";
+  if (collapsed) {
+    src.style.flex = `0 0 ${COLLAPSED_W}px`;
+    return;
+  }
+  const saved = parseInt(localStorage.getItem(PANE_LS_WIDTH) || "0", 10);
+  // No saved width -> the original 2/2 split.
+  src.style.flex = saved ? `0 0 ${clampSourceWidth(saved)}px` : "2";
+}
+
+$("collapse-src").addEventListener("click", () => {
+  const collapsed = localStorage.getItem(PANE_LS_COLLAPSED) === "1";
+  localStorage.setItem(PANE_LS_COLLAPSED, collapsed ? "0" : "1");
+  applyPaneLayout();
+});
+
+let paneDrag = null;
+$("pane-divider").addEventListener("mousedown", e => {
+  paneDrag = { startX: e.clientX, startW: $("col-source").getBoundingClientRect().width };
+  $("pane-divider").classList.add("dragging");
+  document.body.style.userSelect = "none";
+  document.body.style.cursor = "col-resize";
+  e.preventDefault();
+});
+document.addEventListener("mousemove", e => {
+  if (!paneDrag) return;
+  $("col-source").style.flex = `0 0 ${clampSourceWidth(paneDrag.startW + e.clientX - paneDrag.startX)}px`;
+});
+document.addEventListener("mouseup", () => {
+  if (!paneDrag) return;
+  paneDrag = null;
+  $("pane-divider").classList.remove("dragging");
+  document.body.style.userSelect = "";
+  document.body.style.cursor = "";
+  localStorage.setItem(PANE_LS_WIDTH, String(Math.round($("col-source").getBoundingClientRect().width)));
+});
+window.addEventListener("resize", () => {
+  if (!$("review-stage").classList.contains("hidden")) applyPaneLayout();
+});
 
 // ============================================
 // INIT — blank key renders one disabled message (A5)
