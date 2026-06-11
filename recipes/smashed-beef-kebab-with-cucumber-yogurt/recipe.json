@@ -1,0 +1,252 @@
+{
+  "schema_version": "1.0",
+  "title": "Smashed Beef Kebab With Cucumber Yogurt",
+  "slug": "smashed-beef-kebab-with-cucumber-yogurt",
+  "description": "This quick skillet dinner of spiced, seared ground beef over cooling yogurt combines elements of two Persian classics: kebab koobideh (grilled kebabs) and mast-o-khiar (cucumber yogurt). The creamy yogurt base keeps close to the original, while the ground beef is hard-seared on one side like a scallop for a crisp texture. Walnuts and raisins, traditionally toppings for mast-o-khiar, get toasted in the beef fat, adding crunch and sweetness to balance the savory meat and tangy yogurt.",
+  "yield": "4 servings",
+  "servings": 4,
+  "times": {
+    "prep_min": 15,
+    "cook_min": 10,
+    "total_min": 25,
+    "additional": []
+  },
+  "ingredients": [
+    {
+      "display": "2 cups full-fat or low-fat Greek yogurt (about 16 ounces)",
+      "name": "Greek yogurt",
+      "quantity": "2",
+      "unit": "cups",
+      "quantity_min": 2,
+      "quantity_max": 2,
+      "unit_normalized": "cup",
+      "notes": "full-fat or low-fat; about 16 ounces",
+      "optional": false,
+      "group": null
+    },
+    {
+      "display": "2 mini cucumbers (about ½ pound), grated on the large holes of a box grater",
+      "name": "mini cucumbers",
+      "quantity": "2",
+      "unit": "",
+      "quantity_min": 2,
+      "quantity_max": 2,
+      "unit_normalized": "count",
+      "notes": "about ½ pound; grated on the large holes of a box grater",
+      "optional": false,
+      "group": null
+    },
+    {
+      "display": "3 tablespoons finely chopped mint, plus mint leaves for serving",
+      "name": "mint",
+      "quantity": "3",
+      "unit": "tablespoons",
+      "quantity_min": 3,
+      "quantity_max": 3,
+      "unit_normalized": "tbsp",
+      "notes": "finely chopped; plus mint leaves for serving",
+      "optional": false,
+      "group": null
+    },
+    {
+      "display": "1 large garlic clove, finely grated",
+      "name": "garlic",
+      "quantity": "1",
+      "unit": "large clove",
+      "quantity_min": 1,
+      "quantity_max": 1,
+      "unit_normalized": "count",
+      "notes": "finely grated",
+      "optional": false,
+      "group": null
+    },
+    {
+      "display": "1 pound ground beef (preferably 80 percent lean) or ground lamb",
+      "name": "ground beef",
+      "quantity": "1",
+      "unit": "pound",
+      "quantity_min": 1,
+      "quantity_max": 1,
+      "unit_normalized": "lb",
+      "notes": "preferably 80 percent lean; or ground lamb",
+      "optional": false,
+      "group": null
+    },
+    {
+      "display": "1 small yellow onion, grated on the large holes of a box grater (see Tips)",
+      "name": "yellow onion",
+      "quantity": "1",
+      "unit": "small",
+      "quantity_min": 1,
+      "quantity_max": 1,
+      "unit_normalized": "count",
+      "notes": "grated on the large holes of a box grater (see Tips)",
+      "optional": false,
+      "group": null
+    },
+    {
+      "display": "½ teaspoon ground turmeric",
+      "name": "ground turmeric",
+      "quantity": "½",
+      "unit": "teaspoon",
+      "quantity_min": 0.5,
+      "quantity_max": 0.5,
+      "unit_normalized": "tsp",
+      "notes": null,
+      "optional": false,
+      "group": null
+    },
+    {
+      "display": "2 teaspoons kosher salt (such as Diamond Crystal)",
+      "name": "kosher salt",
+      "quantity": "2",
+      "unit": "teaspoons",
+      "quantity_min": 2,
+      "quantity_max": 2,
+      "unit_normalized": "tsp",
+      "notes": "such as Diamond Crystal; divided (1 tsp for beef, 1 tsp for yogurt)",
+      "optional": false,
+      "group": null
+    },
+    {
+      "display": "Freshly ground black pepper",
+      "name": "black pepper",
+      "quantity": "",
+      "unit": "",
+      "quantity_min": null,
+      "quantity_max": null,
+      "unit_normalized": null,
+      "notes": "freshly ground",
+      "optional": false,
+      "group": null
+    },
+    {
+      "display": "¼ cup walnut halves or pieces, or both (see Tips)",
+      "name": "walnuts",
+      "quantity": "¼",
+      "unit": "cup",
+      "quantity_min": 0.25,
+      "quantity_max": 0.25,
+      "unit_normalized": "cup",
+      "notes": "halves or pieces, or both (see Tips)",
+      "optional": false,
+      "group": null
+    },
+    {
+      "display": "2 tablespoons raisins or dried cranberries",
+      "name": "raisins",
+      "quantity": "2",
+      "unit": "tablespoons",
+      "quantity_min": 2,
+      "quantity_max": 2,
+      "unit_normalized": "tbsp",
+      "notes": "or dried cranberries",
+      "optional": false,
+      "group": null
+    },
+    {
+      "display": "Pomegranate molasses, optional, for serving",
+      "name": "pomegranate molasses",
+      "quantity": "",
+      "unit": "",
+      "quantity_min": null,
+      "quantity_max": null,
+      "unit_normalized": null,
+      "notes": "for serving",
+      "optional": true,
+      "group": null
+    },
+    {
+      "display": "Warmed pita or white rice, for serving",
+      "name": "pita or white rice",
+      "quantity": "",
+      "unit": "",
+      "quantity_min": null,
+      "quantity_max": null,
+      "unit_normalized": null,
+      "notes": "warmed; for serving",
+      "optional": false,
+      "group": null
+    }
+  ],
+  "steps": [
+    {
+      "text": "Add the yogurt, cucumbers, chopped mint and garlic to a medium bowl. Mix well to combine.",
+      "section": null,
+      "kind": "prep",
+      "timers": []
+    },
+    {
+      "text": "Chill until ready to serve.",
+      "section": null,
+      "kind": "prep",
+      "timers": []
+    },
+    {
+      "text": "Add the beef, onion, turmeric, 1 teaspoon of salt and lots of black pepper to a second medium bowl and mix well to combine.",
+      "section": null,
+      "kind": "prep",
+      "timers": []
+    },
+    {
+      "text": "Heat a large well-seasoned cast-iron skillet (or other large heavy-bottomed pan) over medium-high.",
+      "section": null,
+      "kind": "cook",
+      "timers": []
+    },
+    {
+      "text": "Once the skillet is very hot, divide beef into large, irregular chunks by using two spoons or your hands and drop into the skillet. Cook, undisturbed, until charred and crisp on the underside and browned at least halfway up the sides, 6 to 8 minutes.",
+      "section": null,
+      "kind": "cook",
+      "timers": [
+        {
+          "duration_seconds_min": 360,
+          "duration_seconds_max": 480,
+          "label": "sear beef undisturbed",
+          "source_phrase": "6 to 8 minutes"
+        }
+      ]
+    },
+    {
+      "text": "Using a wooden spoon, toss the meat, breaking up any very large pieces.",
+      "section": null,
+      "kind": "cook",
+      "timers": []
+    },
+    {
+      "text": "Add the walnuts and raisins and continue to cook, stirring often, until the meat is cooked to desired doneness and the walnuts are toasted, 2 to 3 minutes more.",
+      "section": null,
+      "kind": "cook",
+      "timers": [
+        {
+          "duration_seconds_min": 120,
+          "duration_seconds_max": 180,
+          "label": "cook meat with walnuts and raisins",
+          "source_phrase": "2 to 3 minutes more"
+        }
+      ]
+    },
+    {
+      "text": "Remove the yogurt from the fridge and season with the remaining 1 teaspoon of salt.",
+      "section": null,
+      "kind": "prep",
+      "timers": []
+    },
+    {
+      "text": "Spread the yogurt on the bottom of a serving platter and top with the crispy meat.",
+      "section": null,
+      "kind": "prep",
+      "timers": []
+    },
+    {
+      "text": "Finish with a drizzle of pomegranate molasses, if using, and garnish with mint leaves. Serve with warmed pita or rice.",
+      "section": null,
+      "kind": "prep",
+      "timers": []
+    }
+  ],
+  "serving_suggestions": "Serve with warmed pita or white rice; finish with a drizzle of pomegranate molasses and garnish with mint leaves.",
+  "storage": null,
+  "nutrition": null,
+  "notes": "Tips: To minimize eye irritation while grating, use a chilled onion. Two tablespoons of pistachios or pine nuts can be substituted for the walnuts."
+}

@@ -1,0 +1,21 @@
+{
+  "imported_at": "2026-06-10T23:25:01+00:00",
+  "model": "claude-opus-4-8",
+  "parser_version": "kitchen_import 0.1",
+  "source_type": "paste",
+  "source_url": null,
+  "pages_processed": [
+    {
+      "page_index": 0,
+      "ingredients_extracted": 12,
+      "steps_extracted": 8,
+      "confidence": 0.95,
+      "issues": [
+        "Olive oil is divided (1 tbsp for brushing, 3 tbsp for the food processor, plus a drizzle to serve) — display notes capture this but numeric total stays 4 tbsp."
+      ]
+    }
+  ],
+  "low_confidence_fields": [],
+  "g2_flags": [],
+  "comments": "The step titles are basically the text. They need to be a summary of the step instead of just the text. In the steps I always want the amounts to be mentioned again. Like this \"Now in the bowl of a large food processor, combine the roasted red pepper strips with 3 tbsp extra virgin olive oil, garlic, walnuts, tomato paste, bread crumbs, pomegranate molasses, Aleppo pepper, sugar, sumac, salt and cayenne. Blend into a smooth paste.\"\n\nshould be: \"Now in the bowl of a large food processor, combine the roasted red pepper strips with 3 tbsp extra virgin olive oil, 1 garlic clove, 1/4lb (or 0.25 lbs) walnuts, tomato paste, bread crumbs, pomegranate molasses, Aleppo pepper, sugar, sumac, salt and cayenne. Blend into a smooth paste. etc"
+}

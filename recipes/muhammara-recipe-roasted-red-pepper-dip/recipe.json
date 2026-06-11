@@ -1,0 +1,236 @@
+{
+  "schema_version": "1.0",
+  "title": "Muhammara Recipe (Roasted Red Pepper Dip)",
+  "slug": "muhammara-recipe-roasted-red-pepper-dip",
+  "description": "Muhammara (roasted red pepper and walnut dip) makes the perfect addition to the mezze table next to other favorites like baba ganoush or hummus. Serve it with warm pita bread or pita chips. For a shortcut, feel free to use roasted red peppers from a jar if you don't have time to roast your own peppers.",
+  "yield": "6 people",
+  "servings": 6,
+  "times": {
+    "prep_min": 10,
+    "cook_min": 30,
+    "total_min": null,
+    "additional": []
+  },
+  "ingredients": [
+    {
+      "display": "2 red bell peppers",
+      "name": "red bell peppers",
+      "quantity": "2",
+      "unit": "",
+      "quantity_min": 2,
+      "quantity_max": 2,
+      "unit_normalized": "count",
+      "notes": null,
+      "optional": false,
+      "group": null
+    },
+    {
+      "display": "4 tbsp Extra Virgin Olive Oil divided",
+      "name": "extra virgin olive oil",
+      "quantity": "4",
+      "unit": "tbsp",
+      "quantity_min": 4,
+      "quantity_max": 4,
+      "unit_normalized": "tbsp",
+      "notes": "divided",
+      "optional": false,
+      "group": null
+    },
+    {
+      "display": "1/4 lb shelled toasted walnuts",
+      "name": "walnuts",
+      "quantity": "1/4",
+      "unit": "lb",
+      "quantity_min": 0.25,
+      "quantity_max": 0.25,
+      "unit_normalized": "lb",
+      "notes": "shelled, toasted",
+      "optional": false,
+      "group": null
+    },
+    {
+      "display": "1 garlic clove roughly chopped",
+      "name": "garlic",
+      "quantity": "1",
+      "unit": "clove",
+      "quantity_min": 1,
+      "quantity_max": 1,
+      "unit_normalized": "count",
+      "notes": "roughly chopped",
+      "optional": false,
+      "group": null
+    },
+    {
+      "display": "2 1/2 tbsp tomato paste",
+      "name": "tomato paste",
+      "quantity": "2 1/2",
+      "unit": "tbsp",
+      "quantity_min": 2.5,
+      "quantity_max": 2.5,
+      "unit_normalized": "tbsp",
+      "notes": null,
+      "optional": false,
+      "group": null
+    },
+    {
+      "display": "3/4 cup bread crumbs",
+      "name": "bread crumbs",
+      "quantity": "3/4",
+      "unit": "cup",
+      "quantity_min": 0.75,
+      "quantity_max": 0.75,
+      "unit_normalized": "cup",
+      "notes": null,
+      "optional": false,
+      "group": null
+    },
+    {
+      "display": "2 tbsp pomegranate molasses",
+      "name": "pomegranate molasses",
+      "quantity": "2",
+      "unit": "tbsp",
+      "quantity_min": 2,
+      "quantity_max": 2,
+      "unit_normalized": "tbsp",
+      "notes": "in a pinch substitute with a mixture of lemon juice and honey",
+      "optional": false,
+      "group": null
+    },
+    {
+      "display": "1 tsp Aleppo pepper",
+      "name": "Aleppo pepper",
+      "quantity": "1",
+      "unit": "tsp",
+      "quantity_min": 1,
+      "quantity_max": 1,
+      "unit_normalized": "tsp",
+      "notes": null,
+      "optional": false,
+      "group": null
+    },
+    {
+      "display": "1/2 tsp sugar",
+      "name": "sugar",
+      "quantity": "1/2",
+      "unit": "tsp",
+      "quantity_min": 0.5,
+      "quantity_max": 0.5,
+      "unit_normalized": "tsp",
+      "notes": null,
+      "optional": false,
+      "group": null
+    },
+    {
+      "display": "1 tsp sumac",
+      "name": "sumac",
+      "quantity": "1",
+      "unit": "tsp",
+      "quantity_min": 1,
+      "quantity_max": 1,
+      "unit_normalized": "tsp",
+      "notes": null,
+      "optional": false,
+      "group": null
+    },
+    {
+      "display": "1/2 tsp salt",
+      "name": "salt",
+      "quantity": "1/2",
+      "unit": "tsp",
+      "quantity_min": 0.5,
+      "quantity_max": 0.5,
+      "unit_normalized": "tsp",
+      "notes": null,
+      "optional": false,
+      "group": null
+    },
+    {
+      "display": "1/2 tsp cayenne pepper optional",
+      "name": "cayenne pepper",
+      "quantity": "1/2",
+      "unit": "tsp",
+      "quantity_min": 0.5,
+      "quantity_max": 0.5,
+      "unit_normalized": "tsp",
+      "notes": null,
+      "optional": true,
+      "group": null
+    }
+  ],
+  "steps": [
+    {
+      "text": "Preheat the oven to 425 degrees F.",
+      "section": null,
+      "kind": "prep",
+      "timers": []
+    },
+    {
+      "text": "Brush the bell peppers with 1 tbsp of olive oil, and place in a lightly oiled oven-safe pan or cast-iron skillet.",
+      "section": null,
+      "kind": "prep",
+      "timers": []
+    },
+    {
+      "text": "Roast the peppers in the 425 degrees F heated oven for 30 minutes or so, turning them over once or twice.",
+      "section": null,
+      "kind": "cook",
+      "timers": [
+        {
+          "duration_seconds_min": 1800,
+          "duration_seconds_max": 1800,
+          "label": "roast peppers",
+          "source_phrase": "Roast the peppers in the 425 degrees F heated oven for 30 minutes or so"
+        }
+      ]
+    },
+    {
+      "text": "Remove from the oven and place the peppers in a bowl. Cover with plastic wrap for a few minutes. This traps the steam from the roasted peppers, making them easy to peel.",
+      "section": null,
+      "kind": "cook",
+      "timers": []
+    },
+    {
+      "text": "When cool enough to handle, simply peel the peppers, remove the seeds and slice the peppers into small strips.",
+      "section": null,
+      "kind": "prep",
+      "timers": []
+    },
+    {
+      "text": "Now in the bowl of a large food processor, combine the roasted red pepper strips with 3 tbsp extra virgin olive oil, garlic, toasted walnuts, tomato paste, bread crumbs, pomegranate molasses, Aleppo pepper, sugar, sumac, salt and cayenne. Blend into a smooth paste.",
+      "section": null,
+      "kind": "prep",
+      "timers": []
+    },
+    {
+      "text": "Transfer to a serving bowl. You may cover the muhammara and refrigerate, but be sure to bring the dip to room temperature before serving.",
+      "section": null,
+      "kind": "prep",
+      "timers": []
+    },
+    {
+      "text": "When ready to serve, top the dip with a drizzle of extra virgin olive oil, and garnish with a little more walnuts and fresh parsley, if you like. Serve with pita bread or pita chips. Enjoy!",
+      "section": null,
+      "kind": "prep",
+      "timers": []
+    }
+  ],
+  "serving_suggestions": "Serve with warm pita bread or pita chips as part of a mezze platter next to baba ganoush or hummus. Also great spread on sandwiches or scooped on top of grilled chicken or fish. Top with a drizzle of olive oil and garnish with walnuts and fresh parsley.",
+  "storage": "You can refrigerate muhammara in a tight-lid container for 4 days and up to one week. A thin layer of extra virgin olive oil to cover the top of the dip will help preserve it.",
+  "nutrition": {
+    "per_serving": true,
+    "calories": 201,
+    "carbs_g": 21.5,
+    "protein_g": 5.5,
+    "fat_g": 22.6,
+    "saturated_fat_g": 2.6,
+    "fiber_g": 3.1,
+    "other": {
+      "potassium_mg": 267.6,
+      "vitamin_a_iu": 1511.8,
+      "vitamin_c_mg": 52.5,
+      "calcium_mg": 48.4,
+      "iron_mg": 1.7
+    }
+  },
+  "notes": "Find Aleppo-style pepper and extra virgin olive oil at The Mediterranean Dish online shop. This post originally appeared on The Mediterranean Dish in 2016 and has been updated with new information and media."
+}
