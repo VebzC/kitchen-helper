@@ -339,6 +339,56 @@
     border-radius: 999px;
     margin: 4px 4px 0 0;
   }
+
+  /* M3.2: editable step title */
+  .step-title-input {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 700;
+    font-family: inherit;
+    padding: 3px 6px;
+  }
+  .step-title-input:hover, .step-title-input:focus { background: var(--bg); border-color: var(--border); }
+  .step-title-input::placeholder { color: var(--text-faint); font-weight: 400; }
+
+  /* M3.2: per-step ingredient ref chips */
+  .ref-chips { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  .ref-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 11px;
+    padding: 2px 4px 2px 8px;
+    border-radius: 999px;
+  }
+  .ref-chip-x {
+    background: transparent;
+    border: none;
+    color: var(--text-faint);
+    font-size: 12px;
+    padding: 0 3px;
+    line-height: 1;
+  }
+  .ref-chip-x:hover { color: var(--danger); }
+  .ref-picker {
+    background: transparent;
+    border: 1px dashed var(--border);
+    color: var(--text-faint);
+    font-size: 11px;
+    border-radius: 999px;
+    padding: 2px 6px;
+    font-family: inherit;
+    max-width: 130px;
+  }
+  .ref-picker option { background: var(--bg-card); color: var(--text); }
   .step-actions { display: flex; gap: 6px; margin-top: 6px; }
   .step-actions button {
     background: var(--bg); color: var(--text-dim);
@@ -530,6 +580,7 @@ let clearedFlags = new Set(); // high/soft refs cleared by editing the field
 let highAcknowledged = 0;   // count confirmed through the R4 dialog
 let pendingOthers = [];     // R5 queue of other recipe titles in this paste
 let currentTarget = null;   // R5: which recipe of a multi-recipe paste we parsed
+let structureEdits = [];    // M3.2: ordered split/merge actions, incl. canceling pairs
 let parseMs = 0;
 let elapsedTimer = null;
 
@@ -633,6 +684,7 @@ function enterReview(data, payload, keepComments) {
   wrongFlags.clear();
   clearedFlags.clear();
   highAcknowledged = 0;
+  structureEdits = [];  // new parse = new baseline (also covers Re-parse)
   if (!currentTarget) {
     pendingOthers = [...(data.metadata.other_recipes_detected || [])];
   }
@@ -811,6 +863,18 @@ function renderSteps() {
     head.className = "step-head";
     head.innerHTML = `<span class="step-num">${i + 1}</span>`;
 
+    // M3.2: editable step title — bad model summaries are fixable at review.
+    const titleInput = document.createElement("input");
+    titleInput.className = "step-title-input";
+    titleInput.placeholder = "step title (3–6 words)";
+    titleInput.value = step.title || "";
+    titleInput.dataset.field = `steps[${i}].title`;
+    titleInput.addEventListener("input", () => {
+      edited.steps[i].title = titleInput.value;
+      onFieldEdited(`steps[${i}].title`);
+    });
+    head.appendChild(titleInput);
+
     const kind = document.createElement("button");
     kind.className = "kind-toggle " + (step.kind === "cook" ? "cook" : "");
     kind.textContent = step.kind || "cook";
@@ -862,6 +926,17 @@ function renderSteps() {
       card.appendChild(chips);
     }
 
+    // M3.2: per-step ingredient refs as removable chips + add picker, so
+    // mapping errors are visible (and fixable) at review. Only rendered for
+    // parses that carry refs — 1.0 recipes don't get a synthetic empty row.
+    if (Array.isArray(step.ingredient_refs)) {
+      const refsDiv = document.createElement("div");
+      refsDiv.className = "ref-chips";
+      refsDiv.dataset.field = `steps[${i}].ingredient_refs`;
+      card.appendChild(refsDiv);
+      renderRefChips(refsDiv, i);
+    }
+
     const actions = document.createElement("div");
     actions.className = "step-actions";
     const splitBtn = document.createElement("button");
@@ -881,8 +956,51 @@ function renderSteps() {
   });
 }
 
+// M3.2: ingredient_refs are INDICES into edited.ingredients. The review UI
+// never reorders or deletes ingredients, so indices hold. If ingredient
+// add/remove/reorder ever lands, refs must be remapped here.
+function renderRefChips(container, i) {
+  container.innerHTML = "";
+  const refs = edited.steps[i].ingredient_refs || [];
+  refs.forEach((idx, pos) => {
+    const ing = edited.ingredients[idx];
+    const chip = document.createElement("span");
+    chip.className = "ref-chip";
+    chip.textContent = ing ? (ing.name || ing.display || `#${idx}`) : `#${idx}?`;
+    const x = document.createElement("button");
+    x.className = "ref-chip-x";
+    x.textContent = "×";
+    x.title = "Remove this ingredient from the step";
+    x.onclick = () => {
+      edited.steps[i].ingredient_refs.splice(pos, 1);
+      renderRefChips(container, i);
+      onFieldEdited(`steps[${i}].ingredient_refs`);
+    };
+    chip.appendChild(x);
+    container.appendChild(chip);
+  });
+  const picker = document.createElement("select");
+  picker.className = "ref-picker";
+  picker.innerHTML = `<option value="">+ ingredient…</option>` +
+    edited.ingredients.map((ing, idx) =>
+      refs.includes(idx) ? "" :
+      `<option value="${idx}">${escapeHtml(ing.name || ing.display || "#" + idx)}</option>`
+    ).join("");
+  picker.onchange = () => {
+    if (picker.value === "") return;
+    edited.steps[i].ingredient_refs.push(Number(picker.value));
+    renderRefChips(container, i);
+    onFieldEdited(`steps[${i}].ingredient_refs`);
+  };
+  container.appendChild(picker);
+}
+
 // R3 split: text divides at the cursor into steps N and N+1. Timers follow
 // the half that contains their source_phrase (default: stay with N).
+// M3.2: first half keeps the title, second half gets an empty one (the cook
+// writes one or leaves it blank); both halves inherit ingredient_refs (the
+// cook prunes). Every split is logged to structure_edits, even ones later
+// canceled by a merge.
 function splitStep(i, pos) {
   const t = edited.steps[i].text || "";
   const a = t.slice(0, pos).trim();
@@ -892,15 +1010,17 @@ function splitStep(i, pos) {
   const bTimers = timers.filter(tm => tm.source_phrase && b.includes(tm.source_phrase));
   const aTimers = timers.filter(tm => !bTimers.includes(tm));
   const first  = { ...edited.steps[i], text: a, timers: aTimers };
-  const second = { ...JSON.parse(JSON.stringify(edited.steps[i])), text: b, timers: bTimers };
+  const second = { ...JSON.parse(JSON.stringify(edited.steps[i])), text: b, timers: bTimers, title: "" };
   edited.steps.splice(i, 1, first, second);
+  structureEdits.push({ action: "split", step_index: i, at_char: pos });
   renderSteps();
   refreshFlagsUI();
 }
 
 // R3 merge: text appended to the previous step; timers and metadata combined
 // (kind: "cook" wins — a merged prep+cook step is a cook step; section: the
-// previous step's, falling back to the merged one's).
+// previous step's, falling back to the merged one's). M3.2: the surviving
+// (previous) step's title is kept; ingredient_refs are unioned.
 function mergeStep(i) {
   if (i === 0) return;
   const prev = edited.steps[i - 1], cur = edited.steps[i];
@@ -908,7 +1028,11 @@ function mergeStep(i) {
   prev.timers = (prev.timers || []).concat(cur.timers || []);
   prev.kind = (prev.kind === "cook" || cur.kind === "cook") ? "cook" : "prep";
   prev.section = prev.section || cur.section || null;
+  if (Array.isArray(prev.ingredient_refs) || Array.isArray(cur.ingredient_refs)) {
+    prev.ingredient_refs = [...new Set([...(prev.ingredient_refs || []), ...(cur.ingredient_refs || [])])];
+  }
   edited.steps.splice(i, 1);
+  structureEdits.push({ action: "merge", step_index: i });
   renderSteps();
   refreshFlagsUI();
 }
@@ -1072,7 +1196,7 @@ function diffRecipes(a, b) {
   if ((a.steps || []).length !== (b.steps || []).length) out.push("steps.structure");
   const n = Math.min((a.steps || []).length, (b.steps || []).length);
   for (let i = 0; i < n; i++) {
-    ["text", "section", "kind"].forEach(k => {
+    ["text", "section", "kind", "title", "ingredient_refs"].forEach(k => {
       if (j(a.steps[i][k]) !== j(b.steps[i][k])) out.push(`steps[${i}].${k}`);
     });
   }
@@ -1110,6 +1234,7 @@ async function doSave() {
       body: JSON.stringify({
         slug: data.slug,
         fields_edited: diffRecipes(original.recipe, edited),
+        structure_edits: structureEdits,  // M3.2: ordered, includes canceling pairs
         wrong_flags: [...wrongFlags],
         comments,
         g2_flag_count: (original.g2_flags || []).length,
@@ -1147,6 +1272,7 @@ $("reparse-btn").addEventListener("click", () => {
 
 function resetToInput(clean) {
   original = null; edited = null;
+  structureEdits = [];  // Discard throws the baseline away too
   $("review-stage").classList.add("hidden");
   $("saved-stage").classList.add("hidden");
   $("input-stage").classList.remove("hidden");

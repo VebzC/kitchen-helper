@@ -642,6 +642,7 @@ class Handler(BaseHTTPRequestHandler):
             kitchen_import.log_review_event(
                 slug=req.get("slug"),
                 fields_edited=req.get("fields_edited"),
+                structure_edits=req.get("structure_edits"),
                 wrong_flags=req.get("wrong_flags"),
                 comments=req.get("comments"),
                 g2_flag_count=req.get("g2_flag_count", 0),

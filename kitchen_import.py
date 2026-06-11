@@ -29,8 +29,14 @@ RECIPES_DIR = SCRIPT_DIR / "recipes"
 _SLUG_RE = re.compile(r"^[a-z0-9-]+$")
 
 MODEL = "claude-opus-4-8"
-PARSER_VERSION = "kitchen_import 0.1"
+PARSER_VERSION = "kitchen_import 0.2"
 API_TIMEOUT_SECONDS = 120
+
+# schema_version is owned by code, not the model. New parses stamp CURRENT;
+# the persistence boundary preserves any KNOWN version (1.0 files must keep
+# working everywhere — 1.1 fields are additive and optional to all readers).
+CURRENT_SCHEMA_VERSION = "1.1"
+KNOWN_SCHEMA_VERSIONS = ("1.0", "1.1")
 
 # ============================================
 # INPUT TYPE DETECTION
@@ -129,6 +135,15 @@ _STEP_SCHEMA = {
             "type": "string",
             "description": "One step = one NEXT click on the cooking display. Split multi-action author paragraphs into separate steps (best effort).",
         },
+        "title": {
+            "type": "string",
+            "description": "3-6 word imperative SUMMARY of the step, <=40 chars ('Roast the peppers', 'Blend into a paste'). Must be a summary in your own words — never a copy or truncation of the step text.",
+        },
+        "ingredient_refs": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "description": "Indices into the recipe-level ingredients array for the ingredients this step actually uses. Empty array for steps that use none (preheat, rest, cool).",
+        },
         "section": {
             "type": ["string", "null"],
             "description": "Author sub-heading like 'Make the sauce' (display-only), else null.",
@@ -144,7 +159,10 @@ _STEP_SCHEMA = {
             "description": "Only explicit durations. State-based completions ('until golden') get NO timer.",
         },
     },
-    "required": ["text", "section", "kind", "timers"],
+    # `title` is required in the TOOL schema so the model reliably emits it
+    # (as a schema-optional field it was silently skipped). Readers must
+    # still treat it as optional — 1.0 recipe.json files don't have it.
+    "required": ["text", "title", "section", "kind", "timers", "ingredient_refs"],
 }
 
 _NUTRITION_SCHEMA = {
@@ -175,7 +193,7 @@ _NUTRITION_SCHEMA = {
 _RECORD_RECIPE_SCHEMA = {
     "type": "object",
     "properties": {
-        "schema_version": {"const": "1.0"},
+        "schema_version": {"const": "1.1"},
         "title": {"type": "string"},
         "slug": {
             "type": "string",
@@ -290,6 +308,9 @@ Parsing rules:
 - Weight-first: when the source gives multiple units for one ingredient ("1½ cups (130g) onions"), the structured fields use weight (quantity_min 130, unit_normalized "g"); other units survive only in display/notes. Priority: weight > volume > count > null.
 - Quantities stay source-faithful in `quantity`/`unit`; the numeric fields carry the scalable interpretation. Non-scalable quantities ("to taste", "a pinch") get null quantity_min/quantity_max/unit_normalized.
 - Steps are at cooking-unit granularity: one step = one NEXT click on the display. Split multi-action author paragraphs into separate steps; best effort, a human reviews later.
+- Give every step a `title`: a 3-6 word imperative summary in your own words ("Roast the peppers", "Blend into a paste") — never a copy or truncation of the step text.
+- Weave amounts into step text: when a step references ingredients from the ingredient list, restate each referenced ingredient's quantity inline in the step text, source-faithful formatting ("3 tbsp extra virgin olive oil", "1 garlic clove", "¼ lb walnuts"). Apply to ALL referenced ingredients that have a quantity in the list. For divided ingredients ("4 tbsp olive oil, divided"), allocate the correct portion per step — the allocation must come from the source text's own statements. Never state a quantity that is not present in, or directly derivable from, the ingredient list and instructions. If the amount for a reference is unclear, leave the ingredient name bare rather than guessing.
+- Fill every step's `ingredient_refs` with the indices (into the ingredients array) of the ingredients that step actually uses — you are already identifying them for amount-weaving; record the mapping. Empty array for steps that use none.
 - Preheat/grease/setup actions are steps with kind "prep"; everything else is "cook".
 - Timers only for explicit durations in the text, with the exact source_phrase. State-based completions ("until golden brown") get no timer. min == max when the duration is not a range.
 - Preserve the author's stated times verbatim in `times`, even when prep + cook doesn't equal total — reconciliation is a display concern, not yours.
@@ -442,7 +463,7 @@ def parse_with_claude(content, content_type, source_text=None, target_recipe=Non
     other_recipes_detected = data.pop("other_recipes_detected", [])
     recipe = data
     # schema_version is owned by code, not the model — it marks the recipe.json file-format version, bumped only when the schema design changes.
-    recipe["schema_version"] = "1.0"
+    recipe["schema_version"] = CURRENT_SCHEMA_VERSION
 
     # This null check is a defensive safety net for malformed Claude responses. If logging shows L2's report_insufficient_content path is catching everything reliably, this whole block can be dropped.
     if (
@@ -493,8 +514,11 @@ def save_recipe(recipe, metadata, source_bytes, source_ext, base_dir=None):
         or not recipe.get("steps")
     ):
         raise ValueError("recipe needs a non-empty title, >=1 ingredient, and >=1 step")
-    # schema_version is owned by code, not the model — it marks the recipe.json file-format version, bumped only when the schema design changes.
-    recipe["schema_version"] = "1.0"
+    # schema_version is owned by code, not the model — the persistence boundary
+    # preserves any known version and coerces anything unrecognized to "1.0"
+    # (1.1 fields are additive-optional, so 1.0 readers stay safe either way).
+    if recipe.get("schema_version") not in KNOWN_SCHEMA_VERSIONS:
+        recipe["schema_version"] = "1.0"
 
     final_slug = slug
     n = 2
@@ -555,15 +579,18 @@ def log_parse_event(status, slug=None, source_type=None, parse_ms=None,
         print("[warn] could not write import log: %s" % e)
 
 def log_review_event(slug=None, fields_edited=None, wrong_flags=None, comments=None,
-                     g2_flag_count=0, high_flags_acknowledged=0):
+                     g2_flag_count=0, high_flags_acknowledged=0, structure_edits=None):
     """Append one review_save JSON line per saved review (R6/A6): what the
     human changed (passive), what they flagged as wrong (explicit), and their
-    free-text comments (qualitative). Append-only, never read at runtime."""
+    free-text comments (qualitative). structure_edits (M3.2) is the ordered
+    split/merge action list, including pairs that cancel out. Append-only,
+    never read at runtime."""
     event = {
         "event": "review_save",
         "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "slug": slug,
         "fields_edited": fields_edited or [],
+        "structure_edits": structure_edits or [],
         "wrong_flags": wrong_flags or [],
         "comments": comments or "",
         "g2_flag_count": g2_flag_count,
@@ -656,6 +683,17 @@ if __name__ == "__main__":
         save_recipe(r, meta_with_comment, b"x", "txt", base_dir=tmp)
         assert json.load(open(Path(tmp) / "commented-cake" / "metadata.json"))["comments"] == "step 3 split was wrong"
 
+        # M3.2 schema_version handling: new parses stamp 1.1; persistence
+        # preserves known versions and coerces junk to "1.0".
+        assert CURRENT_SCHEMA_VERSION == "1.1" and CURRENT_SCHEMA_VERSION in KNOWN_SCHEMA_VERSIONS
+        r = _sample_recipe()
+        r["slug"] = "v11-cake"
+        r["schema_version"] = "1.1"
+        save_recipe(r, meta_in, b"x", "txt", base_dir=tmp)
+        assert json.load(open(Path(tmp) / "v11-cake" / "recipe.json"))["schema_version"] == "1.1"
+        # (the earlier _sample_recipe() saves carried schema_version 2.0 and
+        # were stamped "1.0" — asserted above)
+
         # Collision: same slug again -> -2, then -3
         assert save_recipe(_sample_recipe(), meta_in, b"x", "txt", base_dir=tmp) == "test-cake-2"
         assert save_recipe(_sample_recipe(), meta_in, b"x", "txt", base_dir=tmp) == "test-cake-3"
@@ -678,5 +716,14 @@ if __name__ == "__main__":
             raise AssertionError("blank title should have been rejected")
         except ValueError:
             pass
+
+    # M3.2 step schema: title + ingredient_refs present and required in the
+    # TOOL schema (the model skipped title when optional). Readers treat
+    # title as optional regardless — 1.0 files don't carry it.
+    step_props = _STEP_SCHEMA["properties"]
+    assert "title" in step_props and "ingredient_refs" in step_props
+    assert "title" in _STEP_SCHEMA["required"]
+    assert "ingredient_refs" in _STEP_SCHEMA["required"]
+    assert _RECORD_RECIPE_SCHEMA["properties"]["schema_version"]["const"] == "1.1"
 
     print("kitchen_import self-tests passed")

@@ -1449,7 +1449,13 @@ function adaptSchemaRecipe(rec) {
     const text = s.text || "";
     const sentences = splitIntoSentences(text);
     let title, instruction;
-    if (sentences.length <= 1 && text.length <= 80) {
+    if (s.title && s.title.trim()) {
+      // 1.1 recipes carry a model-written summary title (M3.2). The full
+      // step text always renders as body — the title never duplicates it.
+      title = s.title.trim();
+      instruction = text;
+    } else if (sentences.length <= 1 && text.length <= 80) {
+      // 1.0 fallback: unchanged truncation behavior.
       title = text;
       instruction = "";
     } else {
@@ -1466,6 +1472,8 @@ function adaptSchemaRecipe(rec) {
       ingredients: [],
       section,
       sectionBanner: banner,
+      // M3.2: per-step refs are indices into the recipe-level ingredients.
+      ingredientRefs: Array.isArray(s.ingredient_refs) ? s.ingredient_refs : null,
       timersList: (s.timers || []).map(t => ({
         label: t.label || "Timer",
         secondsMin: t.duration_seconds_min || 0,
@@ -1478,6 +1486,10 @@ function adaptSchemaRecipe(rec) {
     metaLine: buildMetaLine(rec),
     isSchema: true,
     fullIngredients: rec.ingredients || [],
+    // M3.2: any step carrying a refs array switches the ingredient panel to
+    // the per-step view; recipes without refs anywhere (1.0 files) keep the
+    // full-list behavior unchanged.
+    hasIngredientRefs: (rec.steps || []).some(s => Array.isArray(s.ingredient_refs)),
     steps: steps.length ? steps : [{ title: rec.title || "Recipe", instruction: "", ingredients: [], timersList: [] }],
   };
 }
@@ -1582,10 +1594,24 @@ function renderStep() {
   const ingDiv = document.getElementById("ingredients-used");
   const ingList = document.getElementById("ingredients-list");
   const ingLabel = ingDiv.querySelector(".ingredients-label");
-  if (activeRecipe.isSchema) {
-    // Schema recipes (S2): the full recipe-level ingredient list, grouped by
-    // the source's sub-headings, on every step. Per-step chips are legacy-only
-    // (deliberate gap — no per-step ingredient mapping exists in the schema).
+  if (activeRecipe.isSchema && activeRecipe.hasIngredientRefs) {
+    // M3.2 per-step view: only the ingredients this step actually uses (no
+    // group sub-headers). Zero refs keeps the panel in place with a dim note
+    // so the layout reads the same at a glance.
+    ingLabel.textContent = "Ingredients";
+    ingDiv.style.display = "";
+    const refs = step.ingredientRefs || [];
+    if (refs.length > 0) {
+      ingList.innerHTML = refs.map(idx => {
+        const ing = activeRecipe.fullIngredients[idx];
+        return ing ? `<div class="ingredient-tag">${escapeHtml(ing.display || ing.name || "")}</div>` : "";
+      }).join("");
+    } else {
+      ingList.innerHTML = `<div style="color: var(--text-faint); font-style: italic;">no ingredients this step</div>`;
+    }
+  } else if (activeRecipe.isSchema) {
+    // Schema recipes without refs anywhere (1.0 files): the full recipe-level
+    // ingredient list, grouped by the source's sub-headings, on every step.
     ingLabel.textContent = "Ingredients";
     if (activeRecipe.fullIngredients.length > 0) {
       // Clear the inline style instead of forcing "block" so the phone media
